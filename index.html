@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>裁相</title>
+  <style>
+    :root {
+      --bg: #161719;
+      --panel: #222426;
+      --panel-2: #2b2e31;
+      --line: #3a3d41;
+      --text: #f2f2f0;
+      --muted: #9aa0a6;
+      --accent: #ff8c00;
+      --accent-dim: rgba(255, 140, 0, .18);
+      --ok: #3dba7a;
+      --danger: #e05757;
+      --shadow: 0 10px 28px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg); color: var(--text);
+      font: 14px/1.45 "Segoe UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+      user-select: none;
+    }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #666; background: #32363a; }
+    button.primary {
+      background: var(--accent);
+      border-color: #ff9f2b;
+      color: #1a1106;
+      font-weight: 700;
+    }
+    button.primary:hover { filter: brightness(1.06); }
+    button:disabled { opacity: .45; cursor: default; }
+    input[type="text"], input[type="number"], select {
+      background: #1a1c1e;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 8px;
+      outline: none;
+    }
+    input[type="text"]:focus, select:focus { border-color: var(--accent); }
+    .app {
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .logo {
+      font-weight: 800;
+      letter-spacing: .04em;
+      color: var(--accent);
+      margin-right: 4px;
+      font-size: 16px;
+    }
+    .spacer { flex: 1; }
+    .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .count b { color: var(--text); font-weight: 650; }
+    .out-dir {
+      color: var(--muted);
+      font-size: 12px;
+      max-width: 220px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .out-dir.set { color: var(--ok); }
+    .workspace {
+      display: grid;
+      grid-template-columns: 168px 1fr 300px;
+      min-height: 0;
+    }
+    .thumbs {
+      border-right: 1px solid var(--line);
+      background: #1b1d1f;
+      overflow: auto;
+      padding: 8px;
+    }
+    .thumb {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .thumb:hover { background: var(--panel-2); }
+    .thumb.active { background: var(--accent-dim); border-color: var(--accent); }
+    .thumb img, .thumb .ph {
+      width: 48px; height: 48px; object-fit: cover;
+      border-radius: 4px; background: #111; flex: none;
+    }
+    .thumb .meta { min-width: 0; }
+    .thumb .name {
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      font-size: 12px;
+    }
+    .thumb .sub { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .thumb.done .sub { color: var(--ok); }
+    .stage {
+      position: relative;
+      min-width: 0;
+      background:
+        radial-gradient(circle at top, #2a2c2e, #141516 55%);
+      overflow: hidden;
+    }
+    #view {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+      touch-action: none;
+    }
+    .hint {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--muted);
+      pointer-events: none;
+      padding: 24px;
+    }
+    .hint strong { color: var(--text); display: block; font-size: 18px; margin-bottom: 8px; }
+    .side {
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+      overflow: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .preview-wrap {
+      background: #111;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      min-height: 180px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    #preview { max-width: 100%; max-height: 280px; display: block; }
+    .group {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .group h3 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 650;
+      letter-spacing: .04em;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .row:last-child { margin-bottom: 0; }
+    .row label { width: 64px; flex: none; color: var(--muted); font-size: 12px; }
+    .row input, .row select { flex: 1; min-width: 0; }
+    .help { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 12px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    kbd {
+      background: #111;
+      border: 1px solid #444;
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 0 5px;
+      color: #ddd;
+      font-size: 11px;
+    }
+    .drop-active .stage { outline: 2px dashed var(--accent); outline-offset: -8px; }
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: 1fr; grid-template-rows: 120px 1fr auto; }
+      .thumbs { display: flex; gap: 6px; overflow: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .thumb { flex: none; width: 150px; margin: 0; }
+      .side { border-left: 0; border-top: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <div class="logo">裁相</div>
+      <button type="button" id="btnOpen">開啟相片</button>
+      <button type="button" id="btnFolder">開啟資料夾</button>
+      <button type="button" id="btnClearCrop">重設裁剪框</button>
+      <div class="spacer"></div>
+      <div class="out-dir" id="outDirLabel">尚未揀輸出資料夾</div>
+      <button type="button" id="btnPickOut" hidden>揀輸出資料夾</button>
+      <div class="count">已存 <b id="doneCount">0</b> / <b id="totalCount">0</b></div>
+      <button type="button" id="btnExport" class="primary">儲存並下一張</button>
+      <button type="button" id="btnSaveAllFolder" hidden>全部寫入資料夾</button>
+      <button type="button" id="btnExportAll">全部匯出 ZIP</button>
+    </header>
+    <div class="workspace">
+      <aside class="thumbs" id="thumbs"></aside>
+      <main class="stage">
+        <canvas id="view"></canvas>
+        <div class="hint" id="hint">
+          <div>
+            <strong>開啟相片，然後拉框裁出你要嘅部份</strong>
+            大量處理時，先揀輸出資料夾，之後每張拉框再按 Enter，<br />
+            就會直接存入該資料夾並自動跳下一張。原相片唔會被改動。
+          </div>
+        </div>
+      </main>
+      <aside class="side">
+        <div class="preview-wrap"><canvas id="preview" width="280" height="180"></canvas></div>
+        <div class="group">
+          <h3>日期時間</h3>
+          <div class="row">
+            <label>來源</label>
+            <span id="dateSource" class="help">未選相</span>
+          </div>
+          <div class="row">
+            <label>印字</label>
+            <input type="text" id="dateText" placeholder="19 08 2026 11:31" spellcheck="false" />
+          </div>
+          <div class="row">
+            <label>格式</label>
+            <select id="dateFormat">
+              <option value="DD MM YYYY HH:MM" selected>DD MM YYYY HH:MM</option>
+              <option value="DD MM YYYY">DD MM YYYY</option>
+              <option value="YYYY-MM-DD HH:MM">YYYY-MM-DD HH:MM</option>
+            </select>
+          </div>
+        </div>
+        <div class="group">
+          <h3>日期樣式</h3>
+          <div class="row">
+            <label>位置</label>
+            <select id="stampPos">
+              <option value="br" selected>右下</option>
+              <option value="bl">左下</option>
+              <option value="tr">右上</option>
+              <option value="tl">左上</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>顏色</label>
+            <select id="stampColor">
+              <option value="255,140,0" selected>橙色</option>
+              <option value="255,255,255">白色</option>
+              <option value="255,255,0">黃色</option>
+              <option value="255,50,50">紅色</option>
+              <option value="0,0,0">黑色</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>字級</label>
+            <input type="range" id="stampSize" min="40" max="200" value="100" />
+            <span id="stampSizeLabel" class="help">100</span>
+          </div>
+          <div class="row">
+            <label></label>
+            <label style="width:auto"><input type="checkbox" id="stampOn" checked /> 加返日期時間</label>
+          </div>
+        </div>
+        <div class="help">
+          日期預設用相片 EXIF 拍攝時間，格式同 Canon 相機：例如 19 08 2026 11:31。<br />
+          檔名會係原本檔名加 <code>_crop</code>，例如 IMG_1234_crop.jpg。<br />
+          大量處理：用 Chrome 或 Edge 先揀輸出資料夾，然後逐張拉框按 Enter 直接儲存，唔使一張張下載。
+        </div>
+      </aside>
+    </div>
+    <footer>
+      <div id="status">未開啟相片</div>
+      <div>
+        <kbd>←</kbd> <kbd>→</kbd> 切換
+        · 滾輪縮放 · 空白鍵拖移
+        · <kbd>Enter</kbd> 儲存並下一張
+        · <kbd>Esc</kbd> 重設裁剪框
+      </div>
+    </footer>
+  </div>
+  <input type="file" id="fileInput" accept="image/*" multiple hidden />
+  <input type="file" id="folderInput" accept="image/*" webkitdirectory directory multiple hidden />
+
+<script>
+(function () {
+  const IMAGE_EXT = /\.(jpe?g|png|webp|gif|bmp|tif{1,2}|jfif)$/i;
+  const photos = [];
+  let current = -1;
+  let bitmap = null; // upright ImageBitmap / canvas of current photo
+  let viewScale = 1, viewX = 0, viewY = 0;
+  let crop = null; // {x,y,w,h} in image pixels
+  let drag = null;
+  let spaceDown = false;
+  let dateDirty = false;
+  let outputDir = null; // FileSystemDirectoryHandle
+
+  const $ = (id) => document.getElementById(id);
+  const view = $("view");
+  const vctx = view.getContext("2d");
+  const preview = $("preview");
+  const pctx = preview.getContext("2d");
+
+  const style = {
+    get format() { return $("dateFormat").value; },
+    get pos() { return $("stampPos").value; },
+    get color() { return $("stampColor").value.split(",").map(Number); },
+    get size() { return Number($("stampSize").value) || 100; },
+    get on() { return $("stampOn").checked; },
+  };
+
+  function setStatus(t) { $("status").textContent = t; }
+
+  function formatDate(dt, fmt) {
+    if (!dt) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    const DD = pad(dt.getDate());
+    const MM = pad(dt.getMonth() + 1);
+    const YYYY = String(dt.getFullYear());
+    const hh = pad(dt.getHours());
+    const mm = pad(dt.getMinutes());
+    if (fmt === "DD MM YYYY") return `${DD} ${MM} ${YYYY}`;
+    if (fmt === "YYYY-MM-DD HH:MM") return `${YYYY}-${MM}-${DD} ${hh}:${mm}`;
+    return `${DD} ${MM} ${YYYY} ${hh}:${mm}`;
+  }
+
+  function parseExifDate(s) {
+    // 2026:08:19 11:31:54
+    const m = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s || "");
+    if (!m) return null;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  }
+
+  function readJpegExif(buf) {
+    const v = new DataView(buf);
+    const out = { date: null, orientation: 1, source: "" };
+    if (v.byteLength < 4 || v.getUint16(0) !== 0xFFD8) return out;
+    let off = 2;
+    while (off + 4 <= v.byteLength) {
+      if (v.getUint8(off) !== 0xFF) break;
+      const marker = v.getUint8(off + 1);
+      if (marker === 0xDA || marker === 0xD9) break;
+      const size = v.getUint16(off + 2);
+      if (size < 2) break;
+      if (marker === 0xE1 && off + 4 + 6 <= v.byteLength) {
+        const sig = String.fromCharCode(
+          v.getUint8(off + 4), v.getUint8(off + 5), v.getUint8(off + 6),
+          v.getUint8(off + 7), v.getUint8(off + 8)
+        );
+        if (sig === "Exif\u0000") {
+          parseTiff(v, off + 10, out);
+        }
+      }
+      off += 2 + size;
+    }
+    return out;
+  }
+
+  function parseTiff(v, start, out) {
+    if (start + 8 > v.byteLength) return;
+    const le = v.getUint16(start) === 0x4949;
+    const u16 = (o) => le ? v.getUint16(o, true) : v.getUint16(o, false);
+    const u32 = (o) => le ? v.getUint32(o, true) : v.getUint32(o, false);
+    if (u16(start + 2) !== 42) return;
+
+    function readIFD(offset) {
+      const tags = {};
+      if (start + offset + 2 > v.byteLength) return tags;
+      const n = u16(start + offset);
+      for (let i = 0; i < n; i++) {
+        const p = start + offset + 2 + i * 12;
+        if (p + 12 > v.byteLength) break;
+        const tag = u16(p);
+        const type = u16(p + 2);
+        const count = u32(p + 4);
+        const valOff = p + 8;
+        let dataOff = valOff;
+        const typeSize = { 1:1, 2:1, 3:2, 4:4, 5:8, 7:1 }[type] || 1;
+        if (count * typeSize > 4) dataOff = start + u32(valOff);
+        tags[tag] = { type, count, dataOff };
+      }
+      return tags;
+    }
+
+    function readAscii(entry) {
+      if (!entry) return "";
+      let s = "";
+      const n = entry.count;
+      for (let i = 0; i < n; i++) {
+        if (entry.dataOff + i >= v.byteLength) break;
+        const c = v.getUint8(entry.dataOff + i);
+        if (c === 0) break;
+        s += String.fromCharCode(c);
+      }
+      return s;
+    }
+
+    function readShort(entry) {
+      if (!entry) return 1;
+      return le ? new DataView(v.buffer).getUint16(entry.dataOff, true)
+                : new DataView(v.buffer).getUint16(entry.dataOff, false);
+    }
+
+    const ifd0 = readIFD(u32(start + 4));
+    if (ifd0[0x0112]) out.orientation = readShort(ifd0[0x0112]) || 1;
+    let exifIFD = null;
+    if (ifd0[0x8769]) {
+      const exifOff = le ? new DataView(v.buffer).getUint32(ifd0[0x8769].dataOff, true)
+                         : new DataView(v.buffer).getUint32(ifd0[0x8769].dataOff, false);
+      exifIFD = readIFD(exifOff);
+    }
+    const dto = exifIFD && exifIFD[0x9003] ? readAscii(exifIFD[0x9003]) : "";
+    const dt = ifd0[0x0132] ? readAscii(ifd0[0x0132]) : "";
+    if (dto) {
+      out.date = parseExifDate(dto);
+      out.source = "EXIF 拍攝時間";
+    } else if (dt) {
+      out.date = parseExifDate(dt);
+      out.source = "EXIF 日期";
+    }
+  }
+
+  async function readPhotoMeta(file) {
+    const head = file.slice(0, 128 * 1024);
+    const buf = await head.arrayBuffer();
+    const exif = readJpegExif(buf);
+    if (!exif.date) {
+      exif.date = file.lastModified ? new Date(file.lastModified) : null;
+      exif.source = exif.date ? "檔案修改時間（無 EXIF）" : "沒有日期";
+    }
+    return exif;
+  }
+
+  function orientedSize(w, h, ori) {
+    return (ori >= 5 && ori <= 8) ? [h, w] : [w, h];
+  }
+
+  function applyOrientation(ctx, ori, w, h) {
+    switch (ori) {
+      case 2: ctx.transform(-1, 0, 0, 1, w, 0); break;
+      case 3: ctx.transform(-1, 0, 0, -1, w, h); break;
+      case 4: ctx.transform(1, 0, 0, -1, 0, h); break;
+      case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+      case 6: ctx.transform(0, 1, -1, 0, h, 0); break;
+      case 7: ctx.transform(0, -1, -1, 0, h, w); break;
+      case 8: ctx.transform(0, -1, 1, 0, 0, w); break;
+    }
+  }
+
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("無法讀取相片"));
+      img.src = url;
+    });
+  }
+
+  async function decodeUpright(file, orientation) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadImage(url);
+      const ori = orientation || 1;
+      const [dw, dh] = orientedSize(img.naturalWidth, img.naturalHeight, ori);
+      const c = document.createElement("canvas");
+      c.width = dw;
+      c.height = dh;
+      const cctx = c.getContext("2d");
+      cctx.save();
+      applyOrientation(cctx, ori, img.naturalWidth, img.naturalHeight);
+      cctx.drawImage(img, 0, 0);
+      cctx.restore();
+      if (typeof createImageBitmap === "function") {
+        try { return await createImageBitmap(c); } catch (e) {}
+      }
+      return c;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function currentPhoto() {
+    return current >= 0 ? photos[current] : null;
+  }
+
+  function stampTextFor(photo) {
+    if (!photo) return "";
+    if (photo.stampOverride != null) return photo.stampOverride;
+    return formatDate(photo.date, style.format);
+  }
+
+  function fitView() {
+    if (!bitmap) return;
+    const w = view.clientWidth, h = view.clientHeight;
+    const s = Math.min(w / bitmap.width, h / bitmap.height) * 0.98;
+    viewScale = Math.max(s, 0.02);
+    viewX = (w - bitmap.width * viewScale) / 2;
+    viewY = (h - bitmap.height * viewScale) / 2;
+  }
+
+  function resizeCanvas() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = view.clientWidth, h = view.clientHeight;
+    view.width = Math.max(1, Math.round(w * dpr));
+    view.height = Math.max(1, Math.round(h * dpr));
+    vctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  function imgToView(x, y) {
+    return [viewX + x * viewScale, viewY + y * viewScale];
+  }
+  function viewToImg(x, y) {
+    return [(x - viewX) / viewScale, (y - viewY) / viewScale];
+  }
+
+  function clampCrop(c) {
+    if (!bitmap || !c) return c;
+    let { x, y, w, h } = c;
+    const W = bitmap.width, H = bitmap.height;
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+    x = Math.max(0, Math.min(W - 1, x));
+    y = Math.max(0, Math.min(H - 1, y));
+    w = Math.max(8, Math.min(W - x, w));
+    h = Math.max(8, Math.min(H - y, h));
+    return { x, y, w, h };
+  }
+
+  function handleRects(c) {
+    const [x, y] = imgToView(c.x, c.y);
+    const w = c.w * viewScale, h = c.h * viewScale;
+    const s = 8;
+    return {
+      nw: [x - s, y - s, s * 2, s * 2],
+      ne: [x + w - s, y - s, s * 2, s * 2],
+      sw: [x - s, y + h - s, s * 2, s * 2],
+      se: [x + w - s, y + h - s, s * 2, s * 2],
+      n:  [x + w / 2 - s, y - s, s * 2, s * 2],
+      s:  [x + w / 2 - s, y + h - s, s * 2, s * 2],
+      w:  [x - s, y + h / 2 - s, s * 2, s * 2],
+      e:  [x + w - s, y + h / 2 - s, s * 2, s * 2],
+      body: [x, y, w, h],
+    };
+  }
+
+  function hitHandle(px, py) {
+    if (!crop) return null;
+    const hs = handleRects(crop);
+    const names = ["nw","ne","sw","se","n","s","w","e"];
+    for (const n of names) {
+      const [x,y,w,h] = hs[n];
+      if (px >= x && py >= y && px <= x + w && py <= y + h) return n;
+    }
+    const [x,y,w,h] = hs.body;
+    if (px >= x && py >= y && px <= x + w && py <= y + h) return "body";
+    return null;
+  }
+
+  function cursorFor(hit) {
+    if (spaceDown) return "grab";
+    return {
+      nw: "nwse-resize", se: "nwse-resize",
+      ne: "nesw-resize", sw: "nesw-resize",
+      n: "ns-resize", s: "ns-resize",
+      w: "ew-resize", e: "ew-resize",
+      body: "move",
+    }[hit] || "crosshair";
+  }
+
+  function drawStampOn(ctx, w, h, text) {
+    if (!style.on || !text) return;
+    const short = Math.min(w, h);
+    const size = Math.max(8, Math.round(short * (style.size / 100) * 0.042));
+    ctx.font = `${size}px Arial, "Segoe UI", "Microsoft JhengHei", sans-serif`;
+    ctx.textBaseline = "top";
+    const metrics = ctx.measureText(text);
+    const tw = metrics.width;
+    const th = (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || size);
+    const margin = Math.max(2, Math.round(size / 2));
+    let x, y;
+    const pos = style.pos;
+    if (pos === "bl") { x = margin; y = h - th - margin; }
+    else if (pos === "tr") { x = w - tw - margin; y = margin; }
+    else if (pos === "tl") { x = margin; y = margin; }
+    else { x = w - tw - margin; y = h - th - margin; }
+    ctx.fillStyle = `rgb(${style.color.join(",")})`;
+    ctx.fillText(text, x, y);
+  }
+
+  function draw() {
+    const w = view.clientWidth, h = view.clientHeight;
+    vctx.clearRect(0, 0, w, h);
+    if (!bitmap) return;
+    vctx.imageSmoothingEnabled = true;
+    vctx.imageSmoothingQuality = "high";
+    vctx.drawImage(bitmap, viewX, viewY, bitmap.width * viewScale, bitmap.height * viewScale);
+    if (crop) {
+      const [x, y] = imgToView(crop.x, crop.y);
+      const cw = crop.w * viewScale, ch = crop.h * viewScale;
+      vctx.save();
+      vctx.fillStyle = "rgba(0,0,0,.5)";
+      vctx.beginPath();
+      vctx.rect(0, 0, w, h);
+      vctx.rect(x, y, cw, ch);
+      vctx.fill("evenodd");
+      vctx.strokeStyle = "rgba(255,140,0,.95)";
+      vctx.lineWidth = 2;
+      vctx.strokeRect(x + 0.5, y + 0.5, cw, ch);
+      const hs = handleRects(crop);
+      vctx.fillStyle = "#fff";
+      vctx.strokeStyle = "#ff8c00";
+      vctx.lineWidth = 1;
+      for (const k of ["nw","ne","sw","se","n","s","w","e"]) {
+        const [hx,hy,hw,hh] = hs[k];
+        vctx.fillRect(hx, hy, hw, hh);
+        vctx.strokeRect(hx, hy, hw, hh);
+      }
+      vctx.restore();
+    }
+    drawPreview();
+  }
+
+  function drawPreview() {
+    const p = currentPhoto();
+    const pw = preview.parentElement.clientWidth - 2;
+    const maxH = 280;
+    if (!bitmap || !crop || !p) {
+      preview.width = Math.max(1, pw);
+      preview.height = 180;
+      pctx.fillStyle = "#111";
+      pctx.fillRect(0, 0, preview.width, preview.height);
+      pctx.fillStyle = "#777";
+      pctx.font = "13px sans-serif";
+      pctx.textAlign = "center";
+      pctx.fillText(bitmap ? "喺相片上拉框裁剪" : "預覽", preview.width / 2, 95);
+      return;
+    }
+    const c = clampCrop(crop);
+    const scale = Math.min(pw / c.w, maxH / c.h, 1);
+    const dw = Math.max(1, Math.round(c.w * scale));
+    const dh = Math.max(1, Math.round(c.h * scale));
+    preview.width = dw;
+    preview.height = dh;
+    pctx.imageSmoothingEnabled = true;
+    pctx.imageSmoothingQuality = "high";
+    pctx.drawImage(bitmap, c.x, c.y, c.w, c.h, 0, 0, dw, dh);
+    // 用同一比例印字，預覽同匯出看起來一致
+    drawStampOn(pctx, dw, dh, stampTextFor(p));
+  }
+
+  function renderThumbs() {
+    const box = $("thumbs");
+    box.innerHTML = photos.map((p, i) => {
+      const cls = "thumb" + (i === current ? " active" : "") + (p.exported ? " done" : "");
+      const sub = p.exported ? "已匯出" : (p.crop ? "已拉框" : (stampTextFor(p) || "未裁"));
+      const src = p.thumbUrl ? `<img alt="" src="${p.thumbUrl}" />` : `<div class="ph"></div>`;
+      return `<div class="${cls}" data-i="${i}">${src}<div class="meta"><div class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div><div class="sub">${escapeHtml(sub)}</div></div></div>`;
+    }).join("");
+    $("doneCount").textContent = String(photos.filter((p) => p.exported).length);
+    $("totalCount").textContent = String(photos.length);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+    }[c]));
+  }
+
+  async function makeThumb(file) {
+    try {
+      const url = URL.createObjectURL(file);
+      const img = await loadImage(url);
+      URL.revokeObjectURL(url);
+      const c = document.createElement("canvas");
+      const s = 96 / Math.max(img.naturalWidth, img.naturalHeight);
+      c.width = Math.max(1, Math.round(img.naturalWidth * s));
+      c.height = Math.max(1, Math.round(img.naturalHeight * s));
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.7);
+    } catch (e) {
+      return "";
+    }
+  }
+
+  async function addFiles(fileList) {
+    const files = [...fileList].filter((f) => IMAGE_EXT.test(f.name) || (f.type || "").startsWith("image/"));
+    files.sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+    if (!files.length) {
+      setStatus("沒有找到相片");
+      return;
+    }
+    const start = photos.length;
+    for (const file of files) {
+      const key = file.name + ":" + file.size + ":" + file.lastModified;
+      if (photos.some((p) => p.key === key)) continue;
+      const meta = await readPhotoMeta(file);
+      photos.push({
+        key, file, name: file.name,
+        date: meta.date,
+        source: meta.source,
+        orientation: meta.orientation || 1,
+        crop: null,
+        stampOverride: null,
+        exported: false,
+        thumbUrl: "",
+      });
+    }
+    $("hint").style.display = photos.length ? "none" : "";
+    renderThumbs();
+    setStatus(`已載入 ${photos.length} 張相片`);
+    if (current < 0 && photos.length) await selectPhoto(start);
+    // thumbs in background
+    for (let i = start; i < photos.length; i++) {
+      photos[i].thumbUrl = await makeThumb(photos[i].file);
+      if (i % 8 === 0) renderThumbs();
+    }
+    renderThumbs();
+  }
+
+  async function selectPhoto(index) {
+    if (index < 0 || index >= photos.length) return;
+    const prev = currentPhoto();
+    if (prev) prev.crop = crop ? { ...crop } : null;
+    current = index;
+    dateDirty = false;
+    const p = photos[current];
+    crop = p.crop ? { ...p.crop } : null;
+    $("dateText").value = stampTextFor(p);
+    $("dateSource").textContent = p.source || "—";
+    setStatus(`${p.name}  ·  ${p.source}${p.date ? "  " + formatDate(p.date, "YYYY-MM-DD HH:MM") : ""}`);
+    renderThumbs();
+    bitmap = await decodeUpright(p.file, p.orientation);
+    fitView();
+    draw();
+  }
+
+  function pointerPos(ev) {
+    const r = view.getBoundingClientRect();
+    return [ev.clientX - r.left, ev.clientY - r.top];
+  }
+
+  view.addEventListener("pointerdown", (ev) => {
+    if (!bitmap) return;
+    view.setPointerCapture(ev.pointerId);
+    const [px, py] = pointerPos(ev);
+    if (spaceDown || ev.button === 1) {
+      drag = { type: "pan", x: px, y: py, vx: viewX, vy: viewY };
+      view.style.cursor = "grabbing";
+      return;
+    }
+    const hit = hitHandle(px, py);
+    const [ix, iy] = viewToImg(px, py);
+    if (hit && hit !== "body") {
+      drag = { type: "resize", handle: hit, start: { ...crop }, ix, iy };
+    } else if (hit === "body") {
+      drag = { type: "move", start: { ...crop }, ix, iy };
+    } else {
+      drag = { type: "new", ix, iy };
+      crop = { x: ix, y: iy, w: 8, h: 8 };
+    }
+  });
+
+  view.addEventListener("pointermove", (ev) => {
+    const [px, py] = pointerPos(ev);
+    if (!drag) {
+      view.style.cursor = bitmap ? cursorFor(hitHandle(px, py)) : "default";
+      return;
+    }
+    if (drag.type === "pan") {
+      viewX = drag.vx + (px - drag.x);
+      viewY = drag.vy + (py - drag.y);
+      draw();
+      return;
+    }
+    const [ix, iy] = viewToImg(px, py);
+    if (drag.type === "new") {
+      crop = clampCrop({
+        x: drag.ix, y: drag.iy,
+        w: ix - drag.ix, h: iy - drag.iy,
+      });
+    } else if (drag.type === "move") {
+      const dx = ix - drag.ix, dy = iy - drag.iy;
+      crop = clampCrop({
+        x: drag.start.x + dx, y: drag.start.y + dy,
+        w: drag.start.w, h: drag.start.h,
+      });
+    } else if (drag.type === "resize") {
+      let { x, y, w, h } = drag.start;
+      const x2 = x + w, y2 = y + h;
+      const hn = drag.handle;
+      let nx = x, ny = y, nx2 = x2, ny2 = y2;
+      if (hn.includes("w")) nx = ix;
+      if (hn.includes("e")) nx2 = ix;
+      if (hn.includes("n")) ny = iy;
+      if (hn.includes("s")) ny2 = iy;
+      crop = clampCrop({ x: nx, y: ny, w: nx2 - nx, h: ny2 - ny });
+    }
+    if (currentPhoto()) currentPhoto().crop = { ...crop };
+    draw();
+  });
+
+  function endDrag() {
+    drag = null;
+    if (currentPhoto()) currentPhoto().crop = crop ? { ...crop } : null;
+    draw();
+    renderThumbs();
+  }
+  view.addEventListener("pointerup", endDrag);
+  view.addEventListener("pointercancel", endDrag);
+
+  view.addEventListener("wheel", (ev) => {
+    if (!bitmap) return;
+    ev.preventDefault();
+    const [px, py] = pointerPos(ev);
+    const [ix, iy] = viewToImg(px, py);
+    const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+    viewScale = Math.max(0.02, Math.min(16, viewScale * factor));
+    viewX = px - ix * viewScale;
+    viewY = py - iy * viewScale;
+    draw();
+  }, { passive: false });
+
+  function renderCroppedBlob(photo, bmp) {
+    const c = clampCrop(photo.crop);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(c.w);
+    canvas.height = Math.round(c.h);
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bmp, c.x, c.y, c.w, c.h, 0, 0, canvas.width, canvas.height);
+    drawStampOn(ctx, canvas.width, canvas.height, stampTextFor(photo));
+    return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", 0.95));
+  }
+
+  function cropName(name) {
+    const dot = name.lastIndexOf(".");
+    const stem = dot >= 0 ? name.slice(0, dot) : name;
+    return `${stem}_crop.jpg`;
+  }
+
+  function downloadBlob(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  function updateOutDirUI() {
+    const btn = $("btnPickOut");
+    const allBtn = $("btnSaveAllFolder");
+    const label = $("outDirLabel");
+    const supported = typeof window.showDirectoryPicker === "function";
+    if (!supported) {
+      btn.hidden = true;
+      allBtn.hidden = true;
+      label.classList.remove("set");
+      label.textContent = "大量儲存請用 Chrome／Edge 打開網頁版";
+      return;
+    }
+    btn.hidden = false;
+    if (outputDir) {
+      label.classList.add("set");
+      label.textContent = "輸出：" + (outputDir.name || "已選資料夾");
+      label.title = outputDir.name || "";
+      btn.textContent = "更改資料夾";
+      allBtn.hidden = false;
+    } else {
+      label.classList.remove("set");
+      label.textContent = "尚未揀輸出資料夾";
+      label.title = "";
+      btn.textContent = "揀輸出資料夾";
+      allBtn.hidden = true;
+    }
+  }
+
+  async function pickOutputDir() {
+    if (typeof window.showDirectoryPicker !== "function") {
+      setStatus("呢個瀏覽器唔支援直接存入資料夾，請用 Chrome 或 Edge 打開網頁版，或者用全部匯出 ZIP");
+      return null;
+    }
+    outputDir = await window.showDirectoryPicker({ mode: "readwrite", id: "cut-photo-output" });
+    updateOutDirUI();
+    setStatus("已選輸出資料夾「" + outputDir.name + "」。之後每張按 Enter，會直接存入並跳下一張");
+    return outputDir;
+  }
+
+  async function writeToOutput(blob, name) {
+    if (!outputDir) return false;
+    const fh = await outputDir.getFileHandle(name, { create: true });
+    const wr = await fh.createWritable();
+    await wr.write(blob);
+    await wr.close();
+    return true;
+  }
+
+  async function exportCurrent(andNext) {
+    const p = currentPhoto();
+    if (!p) return;
+    if (!crop) { setStatus("請先拉框裁剪"); return; }
+    p.crop = { ...crop };
+    const bmp = bitmap;
+    const blob = await renderCroppedBlob(p, bmp);
+    if (!blob) { setStatus("匯出失敗"); return; }
+    const fname = cropName(p.name);
+    try {
+      if (typeof window.showDirectoryPicker === "function" && !outputDir) {
+        try { await pickOutputDir(); } catch (err) {
+          if (!err || err.name !== "AbortError") throw err;
+        }
+      }
+      if (outputDir) {
+        await writeToOutput(blob, fname);
+        setStatus("已存到「" + outputDir.name + "」／" + fname);
+      } else {
+        downloadBlob(blob, fname);
+        setStatus("已下載 " + fname + "。大量處理建議用 Chrome／Edge 先揀輸出資料夾");
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      downloadBlob(blob, fname);
+      setStatus("未能寫入資料夾，已改為下載 " + fname + (err && err.message ? "（" + err.message + "）" : ""));
+    }
+    p.exported = true;
+    renderThumbs();
+    if (andNext && current < photos.length - 1) await selectPhoto(current + 1);
+  }
+
+  // ---- ZIP (STORE) ----
+  function crc32(buf) {
+    let table = crc32.t;
+    if (!table) {
+      table = crc32.t = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        table[n] = c >>> 0;
+      }
+    }
+    let crc = 0 ^ -1;
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    for (let i = 0; i < u8.length; i++) crc = (crc >>> 8) ^ table[(crc ^ u8[i]) & 0xFF];
+    return (crc ^ -1) >>> 0;
+  }
+
+  function strBytes(s) {
+    return new TextEncoder().encode(s);
+  }
+
+  async function buildZip(entries) {
+    // entries: [{name, data: Uint8Array}]
+    const chunks = [];
+    const centrals = [];
+    let offset = 0;
+    const now = new Date();
+    const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() / 2)) & 0xFFFF;
+    const dosDate = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xFFFF;
+
+    function u16(n) { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, n, true); return b; }
+    function u32(n) { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n, true); return b; }
+
+    for (const ent of entries) {
+      const name = strBytes(ent.name);
+      const data = ent.data;
+      const crc = crc32(data);
+      const local = new Uint8Array([
+        ...[0x50,0x4b,0x03,0x04],
+        ...u16(20), ...u16(0), ...u16(0),
+        ...u16(dosTime), ...u16(dosDate),
+        ...u32(crc), ...u32(data.length), ...u32(data.length),
+        ...u16(name.length), ...u16(0)
+      ]);
+      chunks.push(local, name, data);
+      const central = new Uint8Array([
+        ...[0x50,0x4b,0x01,0x02],
+        ...u16(20), ...u16(20), ...u16(0), ...u16(0),
+        ...u16(dosTime), ...u16(dosDate),
+        ...u32(crc), ...u32(data.length), ...u32(data.length),
+        ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+        ...u32(0), ...u32(offset)
+      ]);
+      centrals.push(central, name);
+      offset += local.length + name.length + data.length;
+    }
+    let centralSize = 0;
+    for (const c of centrals) centralSize += c.length;
+    const eocd = new Uint8Array([
+      ...[0x50,0x4b,0x05,0x06],
+      ...u16(0), ...u16(0),
+      ...u16(entries.length), ...u16(entries.length),
+      ...u32(centralSize), ...u32(offset), ...u16(0)
+    ]);
+    const parts = [...chunks, ...centrals, eocd];
+    let total = 0;
+    for (const p of parts) total += p.length;
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return new Blob([out], { type: "application/zip" });
+  }
+
+  async function exportAllZip() {
+    const ready = photos.filter((p) => p.crop);
+    if (!ready.length) { setStatus("尚未有已拉框嘅相片"); return; }
+    setStatus(`正在匯出 ${ready.length} 張…`);
+    const entries = [];
+    const used = new Set();
+    for (const p of ready) {
+      const bmp = (currentPhoto() === p && bitmap) ? bitmap : await decodeUpright(p.file, p.orientation);
+      const blob = await renderCroppedBlob(p, bmp);
+      const data = new Uint8Array(await blob.arrayBuffer());
+      let name = cropName(p.name);
+      let n = 2;
+      while (used.has(name.toLowerCase())) {
+        const stem = name.replace(/_crop(?:_\d+)?\.jpg$/i, "");
+        name = `${stem}_crop_${n}.jpg`;
+        n++;
+      }
+      used.add(name.toLowerCase());
+      entries.push({ name, data });
+      p.exported = true;
+    }
+    const zip = await buildZip(entries);
+    downloadBlob(zip, "裁相_" + formatDate(new Date(), "YYYY-MM-DD HH:MM").replace(/[: ]/g, "") + ".zip");
+    renderThumbs();
+    setStatus(`已匯出 ZIP，共 ${entries.length} 張`);
+  }
+
+  async function saveAllToFolder() {
+    const ready = photos.filter((p) => p.crop);
+    if (!ready.length) { setStatus("尚未有已拉框嘅相片"); return; }
+    if (!outputDir) {
+      try { await pickOutputDir(); } catch (err) {
+        if (err && err.name === "AbortError") return;
+        throw err;
+      }
+    }
+    if (!outputDir) return;
+    setStatus("正在儲存 " + ready.length + " 張到「" + outputDir.name + "」…");
+    for (const p of ready) {
+      const bmp = (currentPhoto() === p && bitmap) ? bitmap : await decodeUpright(p.file, p.orientation);
+      const blob = await renderCroppedBlob(p, bmp);
+      await writeToOutput(blob, cropName(p.name));
+      p.exported = true;
+    }
+    renderThumbs();
+    setStatus("已儲存 " + ready.length + " 張到「" + outputDir.name + "」");
+  }
+
+  // events
+  $("btnOpen").onclick = () => $("fileInput").click();
+  $("btnFolder").onclick = () => $("folderInput").click();
+  $("fileInput").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+  $("folderInput").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+  $("btnClearCrop").onclick = () => {
+    crop = null;
+    if (currentPhoto()) currentPhoto().crop = null;
+    draw();
+    renderThumbs();
+  };
+  $("btnExport").onclick = () => exportCurrent(true).catch((err) => {
+    if (!err || err.name !== "AbortError") setStatus("儲存失敗：" + (err && err.message ? err.message : err));
+  });
+  $("btnExportAll").onclick = () => exportAllZip();
+  $("btnPickOut").onclick = () => pickOutputDir().catch((err) => {
+    if (err && err.name !== "AbortError") setStatus("未能揀資料夾：" + err.message);
+  });
+  $("btnSaveAllFolder").onclick = () => saveAllToFolder().catch((err) => {
+    if (err && err.name !== "AbortError") setStatus("儲存失敗：" + err.message);
+  });
+  updateOutDirUI();
+  $("thumbs").onclick = (e) => {
+    const t = e.target.closest(".thumb");
+    if (t) selectPhoto(Number(t.dataset.i));
+  };
+  $("dateText").addEventListener("input", () => {
+    dateDirty = true;
+    const p = currentPhoto();
+    if (p) p.stampOverride = $("dateText").value;
+    drawPreview();
+  });
+  $("dateFormat").onchange = () => {
+    for (const p of photos) {
+      // 只刷新未人手改過嘅印字
+      if (p.stampOverride == null) {}
+    }
+    const p = currentPhoto();
+    if (p && !dateDirty) {
+      p.stampOverride = null;
+      $("dateText").value = stampTextFor(p);
+    }
+    drawPreview();
+  };
+  ["stampPos","stampColor","stampOn"].forEach((id) => {
+    $(id).addEventListener("change", drawPreview);
+  });
+  $("stampSize").addEventListener("input", () => {
+    $("stampSizeLabel").textContent = $("stampSize").value;
+    drawPreview();
+  });
+
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key === " " && ev.target === document.body || ev.key === " " && ev.target.tagName !== "INPUT") {
+      spaceDown = true;
+      if (ev.target.tagName !== "INPUT") ev.preventDefault();
+    }
+    if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") {
+      if (ev.key === "Enter") ev.target.blur();
+      return;
+    }
+    if (ev.key === "ArrowRight") { ev.preventDefault(); selectPhoto(current + 1); }
+    if (ev.key === "ArrowLeft") { ev.preventDefault(); selectPhoto(current - 1); }
+    if (ev.key === "Escape") {
+      crop = null;
+      if (currentPhoto()) currentPhoto().crop = null;
+      draw(); renderThumbs();
+    }
+    if (ev.key === "Enter") { ev.preventDefault(); exportCurrent(true); }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "s") {
+      ev.preventDefault(); exportCurrent(false);
+    }
+  });
+  window.addEventListener("keyup", (ev) => {
+    if (ev.key === " ") spaceDown = false;
+  });
+
+  // drag & drop
+  const app = $("app");
+  app.addEventListener("dragover", (e) => { e.preventDefault(); app.classList.add("drop-active"); });
+  app.addEventListener("dragleave", (e) => {
+    if (e.target === app) app.classList.remove("drop-active");
+  });
+  app.addEventListener("drop", (e) => {
+    e.preventDefault();
+    app.classList.remove("drop-active");
+    if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+  });
+
+  window.addEventListener("resize", () => { resizeCanvas(); });
+  const ro = new ResizeObserver(() => resizeCanvas());
+  ro.observe(view);
+  resizeCanvas();
+})();
+</script>
+</body>
+</html>
