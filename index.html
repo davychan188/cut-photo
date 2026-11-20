@@ -236,14 +236,39 @@
         <canvas id="view"></canvas>
         <div class="hint" id="hint">
           <div>
-            <strong>開啟相片，然後拉框裁出你要嘅部份</strong>
-            大量處理時，先揀輸出資料夾，之後每張拉框再按 Enter，<br />
-            就會直接存入該資料夾並自動跳下一張。原相片唔會被改動。
+            <strong>開啟相片後會出現一個同原圖比例嘅框</strong>
+            移動或縮放呢個框嚟選要嘅部份，裁出嚟嘅相會同原圖型狀接近，<br />
+            亦可放大回原圖大細。大量處理先揀輸出資料夾，再按 Enter 儲存並跳下一張。
           </div>
         </div>
       </main>
       <aside class="side">
         <div class="preview-wrap"><canvas id="preview" width="280" height="180"></canvas></div>
+        <div class="group">
+          <h3>裁剪框</h3>
+          <div class="row">
+            <label></label>
+            <label style="width:auto"><input type="checkbox" id="lockRatio" checked /> 固定原圖比例</label>
+          </div>
+          <div class="row">
+            <label></label>
+            <label style="width:auto"><input type="checkbox" id="outOrigSize" checked /> 輸出用回原圖尺寸</label>
+          </div>
+          <div class="row">
+            <label>框大細</label>
+            <input type="range" id="frameSize" min="30" max="100" value="80" />
+            <span id="frameSizeLabel" class="help">80%</span>
+          </div>
+          <div class="row">
+            <label></label>
+            <button type="button" id="btnPlaceFrame">放入原圖比例框</button>
+          </div>
+          <div class="row">
+            <label></label>
+            <button type="button" id="btnApplyFrame">套用此框到未裁相片</button>
+          </div>
+          <div class="help" id="outSizeHint">裁出嚟會同原圖一樣比例；輸出可放大回原圖像素大細。</div>
+        </div>
         <div class="group">
           <h3>日期時間</h3>
           <div class="row">
@@ -297,7 +322,8 @@
         <div class="help">
           日期預設用相片 EXIF 拍攝時間，格式同 Canon 相機：例如 19 08 2026 11:31。<br />
           檔名會係原本檔名加 <code>_crop</code>，例如 IMG_1234_crop.jpg。<br />
-          大量處理：用 Chrome 或 Edge 先揀輸出資料夾，然後逐張拉框按 Enter 直接儲存，唔使一張張下載。
+          預設用同原圖一樣嘅長寬比例，輸出亦可放大回原圖像素大細，避免裁完每張型狀同大細唔同。<br />
+          大量處理：用 Chrome 或 Edge 先揀輸出資料夾，然後逐張調框按 Enter 直接儲存，唔使一張張下載。
         </div>
       </aside>
     </div>
@@ -559,6 +585,162 @@
     return { x, y, w, h };
   }
 
+  function lockOn() { return $("lockRatio").checked; }
+  function outOrigOn() { return $("outOrigSize").checked; }
+  function framePct() { return Math.max(30, Math.min(100, Number($("frameSize").value) || 80)); }
+  function originalAspect(bmp) {
+    const im = bmp || bitmap;
+    return im.width / im.height;
+  }
+
+  function clampRatioRect(x, y, w, h, bmp) {
+    const im = bmp || bitmap;
+    const W = im.width, H = im.height;
+    const ar = W / H;
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+    if (Math.abs(w / Math.max(h, 1e-6) - ar) > 1e-6) {
+      if (w / Math.max(h, 1e-6) > ar) h = w / ar;
+      else w = h * ar;
+    }
+    if (w > W) { w = W; h = w / ar; }
+    if (h > H) { h = H; w = h * ar; }
+    const minH = 16, minW = minH * ar;
+    if (w < minW || h < minH) {
+      h = Math.max(minH, h);
+      w = h * ar;
+      if (w > W) { w = W; h = w / ar; }
+    }
+    x = Math.max(0, Math.min(W - w, x));
+    y = Math.max(0, Math.min(H - h, y));
+    return { x, y, w, h };
+  }
+
+  function clampMove(c, bmp) {
+    const im = bmp || bitmap;
+    const W = im.width, H = im.height;
+    let { x, y, w, h } = c;
+    w = Math.min(w, W);
+    h = Math.min(h, H);
+    x = Math.max(0, Math.min(W - w, x));
+    y = Math.max(0, Math.min(H - h, y));
+    return { x, y, w, h };
+  }
+
+  function defaultFrame(pct, bmp) {
+    const im = bmp || bitmap;
+    const p = (pct != null ? pct : framePct()) / 100;
+    const w = im.width * p, h = im.height * p;
+    return clampRatioRect((im.width - w) / 2, (im.height - h) / 2, w, h, im);
+  }
+
+  function placeDefaultFrame() {
+    if (!bitmap) return;
+    crop = defaultFrame();
+    if (currentPhoto()) currentPhoto().crop = { ...crop };
+    syncFrameSlider();
+    updateOutSizeHint();
+    draw();
+    renderThumbs();
+  }
+
+  function syncFrameSlider() {
+    if (!bitmap || !crop) return;
+    const pct = Math.round((crop.w / bitmap.width) * 100);
+    $("frameSize").value = String(Math.max(30, Math.min(100, pct)));
+    $("frameSizeLabel").textContent = $("frameSize").value + "%";
+  }
+
+  function applyFrameSize(pct, center) {
+    if (!bitmap) return;
+    const p = pct / 100;
+    const w = bitmap.width * p, h = bitmap.height * p;
+    let cx, cy;
+    if (center && crop) {
+      cx = crop.x + crop.w / 2;
+      cy = crop.y + crop.h / 2;
+    } else {
+      cx = bitmap.width / 2;
+      cy = bitmap.height / 2;
+    }
+    crop = clampRatioRect(cx - w / 2, cy - h / 2, w, h);
+    if (currentPhoto()) currentPhoto().crop = { ...crop };
+    updateOutSizeHint();
+    draw();
+  }
+
+  function refitCurrentToRatio() {
+    if (!bitmap) return;
+    if (!crop) { placeDefaultFrame(); return; }
+    const cx = crop.x + crop.w / 2, cy = crop.y + crop.h / 2;
+    const pct = Math.min(crop.w / bitmap.width, crop.h / bitmap.height, 1);
+    const w = bitmap.width * Math.max(pct, 0.3);
+    const h = bitmap.height * Math.max(pct, 0.3);
+    crop = clampRatioRect(cx - w / 2, cy - h / 2, w, h);
+    if (currentPhoto()) currentPhoto().crop = { ...crop };
+    syncFrameSlider();
+    updateOutSizeHint();
+    draw();
+  }
+
+  function outputDims(bmp, c) {
+    if (outOrigOn() && Math.abs(c.w / c.h - bmp.width / bmp.height) < 0.02) {
+      return [bmp.width, bmp.height];
+    }
+    return [Math.max(1, Math.round(c.w)), Math.max(1, Math.round(c.h))];
+  }
+
+  function updateOutSizeHint() {
+    const el = $("outSizeHint");
+    if (!bitmap || !crop) {
+      el.textContent = "裁出嚟會同原圖一樣比例；輸出可放大回原圖像素大細。";
+      return;
+    }
+    const c = lockOn() ? clampRatioRect(crop.x, crop.y, crop.w, crop.h) : clampCrop(crop);
+    const [ow, oh] = outputDims(bitmap, c);
+    el.textContent = "呢張原圖 " + bitmap.width + " × " + bitmap.height + "，輸出 " + ow + " × " + oh + "。";
+  }
+
+  function ratioDragBox(x0, y0, x1, y1) {
+    const ar = originalAspect();
+    let w = x1 - x0, h = y1 - y0;
+    const sx = w < 0 ? -1 : 1, sy = h < 0 ? -1 : 1;
+    w = Math.abs(w); h = Math.abs(h);
+    if (h < 1e-6) h = 1;
+    if (w / h > ar) w = h * ar;
+    else h = w / ar;
+    const x = sx < 0 ? x0 - w : x0;
+    const y = sy < 0 ? y0 - h : y0;
+    return clampRatioRect(x, y, w, h);
+  }
+
+  function resizeLocked(start, handle, ix, iy) {
+    const ar = originalAspect();
+    const { x, y, w, h } = start;
+    const x2 = x + w, y2 = y + h;
+    const ax = handle.includes("w") ? x2 : handle.includes("e") ? x : (x + w / 2);
+    const ay = handle.includes("n") ? y2 : handle.includes("s") ? y : (y + h / 2);
+    if (handle.length === 2) {
+      const dw = Math.abs(ix - ax), dh = Math.abs(iy - ay);
+      let nw, nh;
+      if (dw / Math.max(dh, 1e-6) > ar) { nw = dw; nh = dw / ar; }
+      else { nh = dh; nw = dh * ar; }
+      const nx = handle.includes("w") ? ax - nw : ax;
+      const ny = handle.includes("n") ? ay - nh : ay;
+      return clampRatioRect(nx, ny, nw, nh);
+    }
+    if (handle === "e" || handle === "w") {
+      const nw = Math.abs(ix - ax);
+      const nh = nw / ar;
+      const nx = handle === "w" ? ax - nw : ax;
+      return clampRatioRect(nx, (y + h / 2) - nh / 2, nw, nh);
+    }
+    const nh = Math.abs(iy - ay);
+    const nw = nh * ar;
+    const ny = handle === "n" ? ay - nh : ay;
+    return clampRatioRect((x + w / 2) - nw / 2, ny, nw, nh);
+  }
+
   function handleRects(c) {
     const [x, y] = imgToView(c.x, c.y);
     const w = c.w * viewScale, h = c.h * viewScale;
@@ -665,10 +847,10 @@
       pctx.fillStyle = "#777";
       pctx.font = "13px sans-serif";
       pctx.textAlign = "center";
-      pctx.fillText(bitmap ? "喺相片上拉框裁剪" : "預覽", preview.width / 2, 95);
+      pctx.fillText(bitmap ? "放入或拉動裁剪框" : "預覽", preview.width / 2, 95);
       return;
     }
-    const c = clampCrop(crop);
+    const c = lockOn() ? clampRatioRect(crop.x, crop.y, crop.w, crop.h) : clampCrop(crop);
     const scale = Math.min(pw / c.w, maxH / c.h, 1);
     const dw = Math.max(1, Math.round(c.w * scale));
     const dh = Math.max(1, Math.round(c.h * scale));
@@ -699,11 +881,14 @@
     }[c]));
   }
 
-  async function makeThumb(file) {
+  async function makeThumb(photo) {
     try {
-      const url = URL.createObjectURL(file);
+      const url = URL.createObjectURL(photo.file);
       const img = await loadImage(url);
       URL.revokeObjectURL(url);
+      const [iw, ih] = orientedSize(img.naturalWidth, img.naturalHeight, photo.orientation || 1);
+      photo.width = iw;
+      photo.height = ih;
       const c = document.createElement("canvas");
       const s = 96 / Math.max(img.naturalWidth, img.naturalHeight);
       c.width = Math.max(1, Math.round(img.naturalWidth * s));
@@ -744,7 +929,7 @@
     if (current < 0 && photos.length) await selectPhoto(start);
     // thumbs in background
     for (let i = start; i < photos.length; i++) {
-      photos[i].thumbUrl = await makeThumb(photos[i].file);
+      photos[i].thumbUrl = await makeThumb(photos[i]);
       if (i % 8 === 0) renderThumbs();
     }
     renderThumbs();
@@ -763,8 +948,27 @@
     setStatus(`${p.name}  ·  ${p.source}${p.date ? "  " + formatDate(p.date, "YYYY-MM-DD HH:MM") : ""}`);
     renderThumbs();
     bitmap = await decodeUpright(p.file, p.orientation);
+    p.width = bitmap.width;
+    p.height = bitmap.height;
+    if (!crop && p.pendingFrame) {
+      const r = p.pendingFrame;
+      crop = lockOn()
+        ? clampRatioRect(r.rx * p.width, r.ry * p.height, r.rw * p.width, r.rh * p.height)
+        : clampCrop({ x: r.rx * p.width, y: r.ry * p.height, w: r.rw * p.width, h: r.rh * p.height });
+      p.crop = { ...crop };
+      p.pendingFrame = null;
+    } else if (!crop && lockOn()) {
+      crop = defaultFrame();
+      p.crop = { ...crop };
+    } else if (crop && lockOn()) {
+      crop = clampRatioRect(crop.x, crop.y, crop.w, crop.h);
+      p.crop = { ...crop };
+    }
+    syncFrameSlider();
+    updateOutSizeHint();
     fitView();
     draw();
+    renderThumbs();
   }
 
   function pointerPos(ev) {
@@ -807,34 +1011,44 @@
     }
     const [ix, iy] = viewToImg(px, py);
     if (drag.type === "new") {
-      crop = clampCrop({
-        x: drag.ix, y: drag.iy,
-        w: ix - drag.ix, h: iy - drag.iy,
-      });
+      crop = lockOn()
+        ? ratioDragBox(drag.ix, drag.iy, ix, iy)
+        : clampCrop({
+            x: drag.ix, y: drag.iy,
+            w: ix - drag.ix, h: iy - drag.iy,
+          });
     } else if (drag.type === "move") {
       const dx = ix - drag.ix, dy = iy - drag.iy;
-      crop = clampCrop({
+      const moved = {
         x: drag.start.x + dx, y: drag.start.y + dy,
         w: drag.start.w, h: drag.start.h,
-      });
+      };
+      crop = lockOn() ? clampMove(moved) : clampCrop(moved);
     } else if (drag.type === "resize") {
-      let { x, y, w, h } = drag.start;
-      const x2 = x + w, y2 = y + h;
-      const hn = drag.handle;
-      let nx = x, ny = y, nx2 = x2, ny2 = y2;
-      if (hn.includes("w")) nx = ix;
-      if (hn.includes("e")) nx2 = ix;
-      if (hn.includes("n")) ny = iy;
-      if (hn.includes("s")) ny2 = iy;
-      crop = clampCrop({ x: nx, y: ny, w: nx2 - nx, h: ny2 - ny });
+      if (lockOn()) {
+        crop = resizeLocked(drag.start, drag.handle, ix, iy);
+      } else {
+        let { x, y, w, h } = drag.start;
+        const x2 = x + w, y2 = y + h;
+        const hn = drag.handle;
+        let nx = x, ny = y, nx2 = x2, ny2 = y2;
+        if (hn.includes("w")) nx = ix;
+        if (hn.includes("e")) nx2 = ix;
+        if (hn.includes("n")) ny = iy;
+        if (hn.includes("s")) ny2 = iy;
+        crop = clampCrop({ x: nx, y: ny, w: nx2 - nx, h: ny2 - ny });
+      }
     }
     if (currentPhoto()) currentPhoto().crop = { ...crop };
+    updateOutSizeHint();
     draw();
   });
 
   function endDrag() {
     drag = null;
     if (currentPhoto()) currentPhoto().crop = crop ? { ...crop } : null;
+    syncFrameSlider();
+    updateOutSizeHint();
     draw();
     renderThumbs();
   }
@@ -854,15 +1068,19 @@
   }, { passive: false });
 
   function renderCroppedBlob(photo, bmp) {
-    const c = clampCrop(photo.crop);
+    const raw = photo.crop;
+    const c = lockOn()
+      ? clampRatioRect(raw.x, raw.y, raw.w, raw.h, bmp)
+      : clampCrop(raw);
+    const [ow, oh] = outputDims(bmp, c);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(c.w);
-    canvas.height = Math.round(c.h);
+    canvas.width = ow;
+    canvas.height = oh;
     const ctx = canvas.getContext("2d");
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bmp, c.x, c.y, c.w, c.h, 0, 0, canvas.width, canvas.height);
-    drawStampOn(ctx, canvas.width, canvas.height, stampTextFor(photo));
+    ctx.drawImage(bmp, c.x, c.y, c.w, c.h, 0, 0, ow, oh);
+    drawStampOn(ctx, ow, oh, stampTextFor(photo));
     return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", 0.95));
   }
 
@@ -1087,11 +1305,60 @@
   $("fileInput").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
   $("folderInput").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
   $("btnClearCrop").onclick = () => {
-    crop = null;
-    if (currentPhoto()) currentPhoto().crop = null;
-    draw();
-    renderThumbs();
+    if (lockOn() && bitmap) {
+      placeDefaultFrame();
+      setStatus("已重設為原圖比例框");
+    } else {
+      crop = null;
+      if (currentPhoto()) currentPhoto().crop = null;
+      updateOutSizeHint();
+      draw();
+      renderThumbs();
+    }
   };
+  $("btnPlaceFrame").onclick = () => placeDefaultFrame();
+  $("btnApplyFrame").onclick = () => {
+    if (!crop || !bitmap) { setStatus("請先設定裁剪框"); return; }
+    const rel = {
+      rx: crop.x / bitmap.width,
+      ry: crop.y / bitmap.height,
+      rw: crop.w / bitmap.width,
+      rh: crop.h / bitmap.height,
+    };
+    let n = 0;
+    const cur = currentPhoto();
+    for (const ph of photos) {
+      if (ph === cur) continue;
+      if (ph.crop) continue;
+      if (ph.width && ph.height) {
+        ph.crop = lockOn()
+          ? clampRatioRect(rel.rx * ph.width, rel.ry * ph.height, rel.rw * ph.width, rel.rh * ph.height, ph)
+          : { x: rel.rx * ph.width, y: rel.ry * ph.height, w: rel.rw * ph.width, h: rel.rh * ph.height };
+      } else {
+        ph.pendingFrame = rel;
+      }
+      n++;
+    }
+    renderThumbs();
+    setStatus("已將此框套用到 " + n + " 張未裁相片（位置同比例跟呢張）");
+  };
+  $("lockRatio").addEventListener("change", () => {
+    $("frameSize").disabled = !lockOn();
+    if (lockOn()) refitCurrentToRatio();
+    updateOutSizeHint();
+  });
+  $("outOrigSize").addEventListener("change", () => {
+    if ($("outOrigSize").checked && !lockOn()) {
+      $("lockRatio").checked = true;
+      refitCurrentToRatio();
+    }
+    updateOutSizeHint();
+    drawPreview();
+  });
+  $("frameSize").addEventListener("input", () => {
+    $("frameSizeLabel").textContent = $("frameSize").value + "%";
+    if (lockOn()) applyFrameSize(framePct(), true);
+  });
   $("btnExport").onclick = () => exportCurrent(true).catch((err) => {
     if (!err || err.name !== "AbortError") setStatus("儲存失敗：" + (err && err.message ? err.message : err));
   });
@@ -1145,9 +1412,13 @@
     if (ev.key === "ArrowRight") { ev.preventDefault(); selectPhoto(current + 1); }
     if (ev.key === "ArrowLeft") { ev.preventDefault(); selectPhoto(current - 1); }
     if (ev.key === "Escape") {
-      crop = null;
-      if (currentPhoto()) currentPhoto().crop = null;
-      draw(); renderThumbs();
+      if (lockOn() && bitmap) placeDefaultFrame();
+      else {
+        crop = null;
+        if (currentPhoto()) currentPhoto().crop = null;
+        updateOutSizeHint();
+        draw(); renderThumbs();
+      }
     }
     if (ev.key === "Enter") { ev.preventDefault(); exportCurrent(true); }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "s") {
