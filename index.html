@@ -514,20 +514,44 @@
     });
   }
 
+  // 16×8 紅|藍測試圖，EXIF Orientation 6。若瀏覽器已按 EXIF 轉正，natural size 會變成 8×16。
+  // 現代 Chrome / Edge / Safari / Firefox 讀 Image 時會自動轉正；若我哋再轉一次，直向相就會打橫。
+  const ORIENT_PROBE = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4QBCRXhpZgAATU0AKgAAAAgAAgESAAMAAAABAAYAAAEyAAIAAAAUAAAAJgAAAAAyMDI2OjExOjEzIDEwOjA0OjAwAP/bAEMAAgEBAQEBAgEBAQICAgICBAMCAgICBQQEAwQGBQYGBgUGBgYHCQgGBwkHBgYICwgJCgoKCgoGCAsMCwoMCQoKCv/bAEMBAgICAgICBQMDBQoHBgcKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCv/AABEIAAgAEAMBEQACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/APgev5rP9uDzuv8AoYP+bs//2Q==";
+  let _browserOrients = null;
+  function browserAppliesExifOrientation() {
+    if (!_browserOrients) {
+      _browserOrients = (async () => {
+        try {
+          const img = await loadImage(ORIENT_PROBE);
+          return img.naturalWidth === 8 && img.naturalHeight === 16;
+        } catch (e) {
+          return false;
+        }
+      })();
+    }
+    return _browserOrients;
+  }
+
+  function drawUprightCanvas(img, orientation, already) {
+    const ori = already ? 1 : (orientation || 1);
+    const [dw, dh] = orientedSize(img.naturalWidth, img.naturalHeight, ori);
+    const c = document.createElement("canvas");
+    c.width = dw;
+    c.height = dh;
+    const cctx = c.getContext("2d");
+    cctx.save();
+    applyOrientation(cctx, ori, img.naturalWidth, img.naturalHeight);
+    cctx.drawImage(img, 0, 0);
+    cctx.restore();
+    return c;
+  }
+
   async function decodeUpright(file, orientation) {
     const url = URL.createObjectURL(file);
     try {
       const img = await loadImage(url);
-      const ori = orientation || 1;
-      const [dw, dh] = orientedSize(img.naturalWidth, img.naturalHeight, ori);
-      const c = document.createElement("canvas");
-      c.width = dw;
-      c.height = dh;
-      const cctx = c.getContext("2d");
-      cctx.save();
-      applyOrientation(cctx, ori, img.naturalWidth, img.naturalHeight);
-      cctx.drawImage(img, 0, 0);
-      cctx.restore();
+      const already = await browserAppliesExifOrientation();
+      const c = drawUprightCanvas(img, orientation, already);
       if (typeof createImageBitmap === "function") {
         try { return await createImageBitmap(c); } catch (e) {}
       }
@@ -886,14 +910,15 @@
       const url = URL.createObjectURL(photo.file);
       const img = await loadImage(url);
       URL.revokeObjectURL(url);
-      const [iw, ih] = orientedSize(img.naturalWidth, img.naturalHeight, photo.orientation || 1);
-      photo.width = iw;
-      photo.height = ih;
+      const already = await browserAppliesExifOrientation();
+      const full = drawUprightCanvas(img, photo.orientation || 1, already);
+      photo.width = full.width;
+      photo.height = full.height;
+      const s = 96 / Math.max(full.width, full.height);
       const c = document.createElement("canvas");
-      const s = 96 / Math.max(img.naturalWidth, img.naturalHeight);
-      c.width = Math.max(1, Math.round(img.naturalWidth * s));
-      c.height = Math.max(1, Math.round(img.naturalHeight * s));
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.width = Math.max(1, Math.round(full.width * s));
+      c.height = Math.max(1, Math.round(full.height * s));
+      c.getContext("2d").drawImage(full, 0, 0, c.width, c.height);
       return c.toDataURL("image/jpeg", 0.7);
     } catch (e) {
       return "";
