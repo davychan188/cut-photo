@@ -63,6 +63,13 @@
       background: var(--panel);
       border-bottom: 1px solid var(--line);
     }
+    .ver {
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      margin-left: -2px;
+      margin-right: 6px;
+    }
     .logo {
       font-weight: 800;
       letter-spacing: .04em;
@@ -206,6 +213,27 @@
       color: #ddd;
       font-size: 11px;
     }
+
+    button.tool-on {
+      background: var(--accent);
+      border-color: #ff9f2b;
+      color: #1a1106;
+      font-weight: 700;
+    }
+    button.danger {
+      border-color: #7a3030;
+      color: #ffd0d0;
+    }
+    button.danger:hover { border-color: var(--danger); background: #3a2020; }
+    button.danger:disabled { color: var(--muted); border-color: var(--line); }
+    .mode-toggle, .tool-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .tool-grid { margin: 0 0 8px; }
+    .tool-grid button, .mode-toggle button { padding: 6px 8px; font-size: 12px; }
+    .mode-help { margin-top: 8px; }
     .drop-active .stage { outline: 2px dashed var(--accent); outline-offset: -8px; }
     @media (max-width: 900px) {
       .workspace { grid-template-columns: 1fr; grid-template-rows: 120px 1fr auto; }
@@ -219,6 +247,7 @@
   <div class="app" id="app">
     <header>
       <div class="logo">裁相</div>
+      <span class="ver" id="appVersion" title="版本 1.2.0">版本 1.2.0</span>
       <button type="button" id="btnOpen">開啟相片</button>
       <button type="button" id="btnFolder">開啟資料夾</button>
       <button type="button" id="btnClearCrop">重設裁剪框</button>
@@ -245,6 +274,14 @@
       <aside class="side">
         <div class="preview-wrap"><canvas id="preview" width="280" height="180"></canvas></div>
         <div class="group">
+          <h3>操作模式</h3>
+          <div class="mode-toggle">
+            <button type="button" id="btnModeCrop" class="tool-on">拉框</button>
+            <button type="button" id="btnModeAnn">標註</button>
+          </div>
+          <div class="help mode-help">拉框：移動或縮放裁剪框。標註：加箭咀、虛線同圓圈。</div>
+        </div>
+        <div class="group">
           <h3>裁剪框</h3>
           <div class="row">
             <label></label>
@@ -268,6 +305,38 @@
             <button type="button" id="btnApplyFrame">套用此框到未裁相片</button>
           </div>
           <div class="help" id="outSizeHint">裁出嚟會同原圖一樣比例；輸出可放大回原圖像素大細。</div>
+        </div>
+        <div class="group">
+          <h3>標註圖形</h3>
+          <div class="row" style="margin-bottom:8px">
+            <button type="button" id="btnAnnSelect" style="flex:1">選取</button>
+          </div>
+          <div class="tool-grid">
+            <button type="button" id="btnAnnArrow">箭咀</button>
+            <button type="button" id="btnAnnDash">直線虛線</button>
+            <button type="button" id="btnAnnCurve">弧型虛線</button>
+            <button type="button" id="btnAnnCircle">圓圈</button>
+          </div>
+          <div class="row">
+            <label>大細</label>
+            <input type="range" id="annSize" min="2" max="80" value="16" />
+            <span id="annSizeLabel" class="help">16</span>
+          </div>
+          <div class="row">
+            <label>顏色</label>
+            <select id="annColor">
+              <option value="#e53935" selected>紅色</option>
+              <option value="#ffe600">黃色</option>
+              <option value="#ffffff">白色</option>
+              <option value="#00e5ff">青色</option>
+              <option value="#111111">黑色</option>
+            </select>
+          </div>
+          <div class="row">
+            <label></label>
+            <button type="button" id="btnDelShape" class="danger" disabled>刪除此圖形</button>
+          </div>
+          <div class="help">喺標註模式拖曳嚟畫圖形，拉住圖形或白點就可以移動同改形狀。圖形跟住相片內容，移動裁剪框唔會帶走佢哋。</div>
         </div>
         <div class="group">
           <h3>日期時間</h3>
@@ -324,6 +393,7 @@
           檔名會係原本檔名加 <code>_crop</code>，例如 IMG_1234_crop.jpg。<br />
           預設用同原圖一樣嘅長寬比例，輸出亦可放大回原圖像素大細，避免裁完每張型狀同大細唔同。<br />
           大量處理：用 Chrome 或 Edge 先揀輸出資料夾，然後逐張調框按 Enter 直接儲存，唔使一張張下載。
+          標註圖形會印喺裁好嘅相片上，日期時間最後先印。
         </div>
       </aside>
     </div>
@@ -333,7 +403,8 @@
         <kbd>←</kbd> <kbd>→</kbd> 切換
         · 滾輪縮放 · 空白鍵拖移
         · <kbd>Enter</kbd> 儲存並下一張
-        · <kbd>Esc</kbd> 重設裁剪框
+        · <kbd>Esc</kbd> 取消選取／重設裁剪框
+        · <kbd>Delete</kbd> 刪除圖形
       </div>
     </footer>
   </div>
@@ -352,6 +423,10 @@
   let spaceDown = false;
   let dateDirty = false;
   let outputDir = null; // FileSystemDirectoryHandle
+  let editMode = "crop"; // "crop" | "annotate"
+  let annTool = "select"; // "select" | "arrow" | "dash" | "curve" | "circle"
+  let selectedShapeId = null;
+  let shapeSeq = 1;
 
   const $ = (id) => document.getElementById(id);
   const view = $("view");
@@ -806,6 +881,312 @@
     }[hit] || "crosshair";
   }
 
+
+  // ---- 標註圖形 ----
+  function annColorVal() { return $("annColor").value || "#e53935"; }
+  function annSizeVal() { return Math.max(2, Math.min(80, Number($("annSize").value) || 16)); }
+
+  function currentShapes() {
+    const p = currentPhoto();
+    if (!p) return [];
+    if (!Array.isArray(p.shapes)) p.shapes = [];
+    return p.shapes;
+  }
+  function selectedShape() {
+    if (!selectedShapeId) return null;
+    return currentShapes().find((s) => s.id === selectedShapeId) || null;
+  }
+  function setEditMode(mode) {
+    editMode = mode === "annotate" ? "annotate" : "crop";
+    if (editMode === "crop") selectedShapeId = null;
+    syncAnnUI();
+    draw();
+  }
+  function setAnnTool(tool) {
+    annTool = tool;
+    editMode = "annotate";
+    syncAnnUI();
+    draw();
+  }
+  function syncAnnUI() {
+    const cropBtn = $("btnModeCrop");
+    const annBtn = $("btnModeAnn");
+    if (cropBtn) cropBtn.classList.toggle("tool-on", editMode === "crop");
+    if (annBtn) annBtn.classList.toggle("tool-on", editMode === "annotate");
+    const map = {
+      select: "btnAnnSelect",
+      arrow: "btnAnnArrow",
+      dash: "btnAnnDash",
+      curve: "btnAnnCurve",
+      circle: "btnAnnCircle",
+    };
+    for (const [tool, id] of Object.entries(map)) {
+      const el = $(id);
+      if (el) el.classList.toggle("tool-on", editMode === "annotate" && annTool === tool);
+    }
+    const del = $("btnDelShape");
+    if (del) del.disabled = !selectedShape();
+    const sh = selectedShape();
+    if (sh) {
+      $("annSize").value = String(sh.size);
+      $("annSizeLabel").textContent = String(sh.size);
+      const opt = [...$("annColor").options].some((o) => o.value === sh.color);
+      if (opt) $("annColor").value = sh.color;
+    } else {
+      $("annSizeLabel").textContent = $("annSize").value;
+    }
+  }
+  function cloneShape(sh) { return JSON.parse(JSON.stringify(sh)); }
+  function newShape(type, ix, iy) {
+    const size = annSizeVal();
+    const color = annColorVal();
+    const id = "s" + (shapeSeq++);
+    if (type === "circle") {
+      return { id, type, size, color, cx: ix, cy: iy, rx: 8, ry: 8 };
+    }
+    const s = { id, type, size, color, x1: ix, y1: iy, x2: ix + 8, y2: iy };
+    if (type === "curve") { s.cx = ix + 4; s.cy = iy - 16; }
+    return s;
+  }
+  function placeCurveControl(sh) {
+    const dx = sh.x2 - sh.x1, dy = sh.y2 - sh.y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const mx = (sh.x1 + sh.x2) / 2, my = (sh.y1 + sh.y2) / 2;
+    sh.cx = mx + (-dy / len) * len * 0.28;
+    sh.cy = my + (dx / len) * len * 0.28;
+  }
+  function updateNewShape(sh, x0, y0, x1, y1) {
+    if (sh.type === "circle") {
+      sh.cx = x0;
+      sh.cy = y0;
+      const r = Math.max(8, Math.hypot(x1 - x0, y1 - y0));
+      sh.rx = r;
+      sh.ry = r;
+      return;
+    }
+    sh.x1 = x0; sh.y1 = y0; sh.x2 = x1; sh.y2 = y1;
+    if (sh.type === "curve") placeCurveControl(sh);
+  }
+  function moveShape(sh, dx, dy) {
+    if (sh.type === "circle") { sh.cx += dx; sh.cy += dy; return; }
+    sh.x1 += dx; sh.y1 += dy; sh.x2 += dx; sh.y2 += dy;
+    if (sh.type === "curve") { sh.cx += dx; sh.cy += dy; }
+  }
+  function shapeTooSmall(sh) {
+    if (sh.type === "circle") return Math.max(sh.rx, sh.ry) < 6;
+    return Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1) < 8;
+  }
+  function shapeHandles(sh) {
+    if (sh.type === "circle") {
+      return [
+        { name: "e", x: sh.cx + sh.rx, y: sh.cy },
+        { name: "w", x: sh.cx - sh.rx, y: sh.cy },
+        { name: "s", x: sh.cx, y: sh.cy + sh.ry },
+        { name: "n", x: sh.cx, y: sh.cy - sh.ry },
+      ];
+    }
+    const hs = [
+      { name: "p1", x: sh.x1, y: sh.y1 },
+      { name: "p2", x: sh.x2, y: sh.y2 },
+    ];
+    if (sh.type === "curve") hs.push({ name: "c1", x: sh.cx, y: sh.cy });
+    return hs;
+  }
+  function applyHandle(sh, name, ix, iy) {
+    if (sh.type === "circle") {
+      if (name === "e" || name === "w") sh.rx = Math.max(6, Math.abs(ix - sh.cx));
+      if (name === "n" || name === "s") sh.ry = Math.max(6, Math.abs(iy - sh.cy));
+      return;
+    }
+    if (name === "p1") { sh.x1 = ix; sh.y1 = iy; }
+    if (name === "p2") { sh.x2 = ix; sh.y2 = iy; }
+    if (name === "c1") { sh.cx = ix; sh.cy = iy; }
+  }
+  function hitAnnHandle(px, py) {
+    const sh = selectedShape();
+    if (!sh || editMode !== "annotate") return null;
+    const s = 9;
+    for (const h of shapeHandles(sh)) {
+      const [x, y] = imgToView(h.x, h.y);
+      if (px >= x - s && py >= y - s && px <= x + s && py <= y + s) {
+        return { shape: sh, handle: h.name };
+      }
+    }
+    return null;
+  }
+  function distToSeg(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const l2 = dx * dx + dy * dy;
+    if (l2 < 1e-8) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * dx + (py - y1) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+  }
+  function distToQuad(px, py, x1, y1, cx, cy, x2, y2) {
+    let best = Infinity;
+    let ax = x1, ay = y1;
+    for (let i = 1; i <= 32; i++) {
+      const t = i / 32, u = 1 - t;
+      const x = u * u * x1 + 2 * u * t * cx + t * t * x2;
+      const y = u * u * y1 + 2 * u * t * cy + t * t * y2;
+      const d = distToSeg(px, py, ax, ay, x, y);
+      if (d < best) best = d;
+      ax = x; ay = y;
+    }
+    return best;
+  }
+  function hitShapeBody(sh, ix, iy) {
+    const tol = Math.max(sh.size * 1.6, 10 / viewScale);
+    if (sh.type === "circle") {
+      const nx = (ix - sh.cx) / Math.max(sh.rx, 1e-6);
+      const ny = (iy - sh.cy) / Math.max(sh.ry, 1e-6);
+      const d = Math.hypot(nx, ny);
+      return d <= 1 || Math.abs(d - 1) * Math.max(sh.rx, sh.ry) <= tol;
+    }
+    if (sh.type === "curve") {
+      return distToQuad(ix, iy, sh.x1, sh.y1, sh.cx, sh.cy, sh.x2, sh.y2) <= tol;
+    }
+    return distToSeg(ix, iy, sh.x1, sh.y1, sh.x2, sh.y2) <= tol;
+  }
+  function hitShapeAt(px, py) {
+    const [ix, iy] = viewToImg(px, py);
+    const list = currentShapes();
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (hitShapeBody(list[i], ix, iy)) return list[i];
+    }
+    return null;
+  }
+  function deleteSelectedShape() {
+    const sh = selectedShape();
+    if (!sh) return;
+    const list = currentShapes();
+    const i = list.indexOf(sh);
+    if (i >= 0) list.splice(i, 1);
+    selectedShapeId = null;
+    syncAnnUI();
+    draw();
+  }
+  function viewXf() {
+    return {
+      scale: viewScale,
+      map(x, y) { return [viewX + x * viewScale, viewY + y * viewScale]; },
+    };
+  }
+  function cropXf(c, ow, oh) {
+    const sx = ow / c.w, sy = oh / c.h;
+    return {
+      scale: (sx + sy) / 2,
+      map(x, y) { return [(x - c.x) * sx, (y - c.y) * sy]; },
+    };
+  }
+  function hexToRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return [229, 57, 53];
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function drawOneAnn(ctx, sh, xf) {
+    const s = Math.max(1, sh.size * xf.scale);
+    const [r, g, b] = hexToRgb(sh.color);
+    const color = sh.color || "#e53935";
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = s;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (sh.type === "arrow") {
+      const [x1, y1] = xf.map(sh.x1, sh.y1);
+      const [x2, y2] = xf.map(sh.x2, sh.y2);
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      const headLen = Math.max(s * 3.2, 7);
+      const headWid = Math.max(s * 2.2, 5);
+      const bx = x2 - ux * headLen, by = y2 - uy * headLen;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(bx - uy * headWid, by + ux * headWid);
+      ctx.lineTo(bx + uy * headWid, by - ux * headWid);
+      ctx.closePath();
+      ctx.fill();
+    } else if (sh.type === "dash") {
+      const [x1, y1] = xf.map(sh.x1, sh.y1);
+      const [x2, y2] = xf.map(sh.x2, sh.y2);
+      ctx.setLineDash([s * 3.2, s * 2.2]);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (sh.type === "curve") {
+      const [x1, y1] = xf.map(sh.x1, sh.y1);
+      const [cx, cy] = xf.map(sh.cx, sh.cy);
+      const [x2, y2] = xf.map(sh.x2, sh.y2);
+      ctx.setLineDash([s * 3.2, s * 2.2]);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(cx, cy, x2, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (sh.type === "circle") {
+      const [cx, cy] = xf.map(sh.cx, sh.cy);
+      const rx = Math.max(1, sh.rx * xf.scale);
+      const ry = Math.max(1, sh.ry * xf.scale);
+      ctx.fillStyle = `rgba(${r},${g},${b},0.12)`;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawAnnHandles(ctx, sh, xf) {
+    ctx.save();
+    if (sh.type === "curve") {
+      const [x1, y1] = xf.map(sh.x1, sh.y1);
+      const [cx, cy] = xf.map(sh.cx, sh.cy);
+      const [x2, y2] = xf.map(sh.x2, sh.y2);
+      ctx.strokeStyle = "rgba(255,255,255,.7)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    for (const h of shapeHandles(sh)) {
+      const [x, y] = xf.map(h.x, h.y);
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 1;
+      if (h.name === "c1") {
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillRect(x - 5, y - 5, 10, 10);
+        ctx.strokeRect(x - 5, y - 5, 10, 10);
+      }
+    }
+    ctx.restore();
+  }
+  function drawAnnotationsOn(ctx, shapes, xf, opts) {
+    if (!shapes || !shapes.length) return;
+    for (const sh of shapes) drawOneAnn(ctx, sh, xf);
+    if (opts && opts.showHandles && opts.selectedId) {
+      const sh = shapes.find((s) => s.id === opts.selectedId);
+      if (sh) drawAnnHandles(ctx, sh, xf);
+    }
+  }
+
   function drawStampOn(ctx, w, h, text) {
     if (!style.on || !text) return;
     const short = Math.min(w, h);
@@ -845,17 +1226,23 @@
       vctx.strokeStyle = "rgba(255,140,0,.95)";
       vctx.lineWidth = 2;
       vctx.strokeRect(x + 0.5, y + 0.5, cw, ch);
-      const hs = handleRects(crop);
-      vctx.fillStyle = "#fff";
-      vctx.strokeStyle = "#ff8c00";
-      vctx.lineWidth = 1;
-      for (const k of ["nw","ne","sw","se","n","s","w","e"]) {
-        const [hx,hy,hw,hh] = hs[k];
-        vctx.fillRect(hx, hy, hw, hh);
-        vctx.strokeRect(hx, hy, hw, hh);
+      if (editMode === "crop") {
+        const hs = handleRects(crop);
+        vctx.fillStyle = "#fff";
+        vctx.strokeStyle = "#ff8c00";
+        vctx.lineWidth = 1;
+        for (const k of ["nw","ne","sw","se","n","s","w","e"]) {
+          const [hx,hy,hw,hh] = hs[k];
+          vctx.fillRect(hx, hy, hw, hh);
+          vctx.strokeRect(hx, hy, hw, hh);
+        }
       }
       vctx.restore();
     }
+    drawAnnotationsOn(vctx, currentShapes(), viewXf(), {
+      showHandles: editMode === "annotate",
+      selectedId: selectedShapeId,
+    });
     drawPreview();
   }
 
@@ -883,7 +1270,8 @@
     pctx.imageSmoothingEnabled = true;
     pctx.imageSmoothingQuality = "high";
     pctx.drawImage(bitmap, c.x, c.y, c.w, c.h, 0, 0, dw, dh);
-    // 用同一比例印字，預覽同匯出看起來一致
+    drawAnnotationsOn(pctx, p.shapes || [], cropXf(c, dw, dh));
+    // 用同一比例印字，預覽同匯出看起來一致；日期最後印，避免被圖形遮住
     drawStampOn(pctx, dw, dh, stampTextFor(p));
   }
 
@@ -943,6 +1331,7 @@
         source: meta.source,
         orientation: meta.orientation || 1,
         crop: null,
+        shapes: [],
         stampOverride: null,
         exported: false,
         thumbUrl: "",
@@ -989,8 +1378,10 @@
       crop = clampRatioRect(crop.x, crop.y, crop.w, crop.h);
       p.crop = { ...crop };
     }
+    selectedShapeId = null;
     syncFrameSlider();
     updateOutSizeHint();
+    syncAnnUI();
     fitView();
     draw();
     renderThumbs();
@@ -1005,13 +1396,44 @@
     if (!bitmap) return;
     view.setPointerCapture(ev.pointerId);
     const [px, py] = pointerPos(ev);
+    const [ix, iy] = viewToImg(px, py);
     if (spaceDown || ev.button === 1) {
       drag = { type: "pan", x: px, y: py, vx: viewX, vy: viewY };
       view.style.cursor = "grabbing";
       return;
     }
+    if (editMode === "annotate") {
+      const hh = hitAnnHandle(px, py);
+      if (hh) {
+        selectedShapeId = hh.shape.id;
+        drag = { type: "ann-handle", handle: hh.handle, id: hh.shape.id };
+        syncAnnUI();
+        draw();
+        return;
+      }
+      const hitSh = hitShapeAt(px, py);
+      if (hitSh) {
+        selectedShapeId = hitSh.id;
+        drag = { type: "ann-move", id: hitSh.id, startX: ix, startY: iy, snapshot: cloneShape(hitSh) };
+        syncAnnUI();
+        draw();
+        return;
+      }
+      if (annTool && annTool !== "select") {
+        const sh = newShape(annTool, ix, iy);
+        currentShapes().push(sh);
+        selectedShapeId = sh.id;
+        drag = { type: "ann-new", id: sh.id, ix, iy };
+        syncAnnUI();
+        draw();
+        return;
+      }
+      selectedShapeId = null;
+      syncAnnUI();
+      draw();
+      return;
+    }
     const hit = hitHandle(px, py);
-    const [ix, iy] = viewToImg(px, py);
     if (hit && hit !== "body") {
       drag = { type: "resize", handle: hit, start: { ...crop }, ix, iy };
     } else if (hit === "body") {
@@ -1022,10 +1444,25 @@
     }
   });
 
+  function annotateCursor(px, py) {
+    if (spaceDown) return "grab";
+    const hh = hitAnnHandle(px, py);
+    if (hh) {
+      const h = hh.handle;
+      if (h === "n" || h === "s") return "ns-resize";
+      if (h === "e" || h === "w") return "ew-resize";
+      return "pointer";
+    }
+    if (hitShapeAt(px, py)) return "move";
+    return (annTool && annTool !== "select") ? "crosshair" : "default";
+  }
+
   view.addEventListener("pointermove", (ev) => {
     const [px, py] = pointerPos(ev);
     if (!drag) {
-      view.style.cursor = bitmap ? cursorFor(hitHandle(px, py)) : "default";
+      if (!bitmap) view.style.cursor = "default";
+      else if (editMode === "annotate") view.style.cursor = annotateCursor(px, py);
+      else view.style.cursor = cursorFor(hitHandle(px, py));
       return;
     }
     if (drag.type === "pan") {
@@ -1035,6 +1472,21 @@
       return;
     }
     const [ix, iy] = viewToImg(px, py);
+    if (drag.type && String(drag.type).startsWith("ann")) {
+      const sh = currentShapes().find((s) => s.id === drag.id);
+      if (sh) {
+        if (drag.type === "ann-new") {
+          updateNewShape(sh, drag.ix, drag.iy, ix, iy);
+        } else if (drag.type === "ann-move") {
+          Object.assign(sh, cloneShape(drag.snapshot));
+          moveShape(sh, ix - drag.startX, iy - drag.startY);
+        } else if (drag.type === "ann-handle") {
+          applyHandle(sh, drag.handle, ix, iy);
+        }
+      }
+      draw();
+      return;
+    }
     if (drag.type === "new") {
       crop = lockOn()
         ? ratioDragBox(drag.ix, drag.iy, ix, iy)
@@ -1070,6 +1522,19 @@
   });
 
   function endDrag() {
+    if (drag && drag.type && String(drag.type).startsWith("ann")) {
+      const sh = selectedShape();
+      if (drag.type === "ann-new" && sh && shapeTooSmall(sh)) {
+        const list = currentShapes();
+        const i = list.indexOf(sh);
+        if (i >= 0) list.splice(i, 1);
+        selectedShapeId = null;
+      }
+      drag = null;
+      syncAnnUI();
+      draw();
+      return;
+    }
     drag = null;
     if (currentPhoto()) currentPhoto().crop = crop ? { ...crop } : null;
     syncFrameSlider();
@@ -1105,6 +1570,7 @@
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(bmp, c.x, c.y, c.w, c.h, 0, 0, ow, oh);
+    drawAnnotationsOn(ctx, photo.shapes || [], cropXf(c, ow, oh));
     drawStampOn(ctx, ow, oh, stampTextFor(photo));
     return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", 0.95));
   }
@@ -1424,6 +1890,24 @@
     $("stampSizeLabel").textContent = $("stampSize").value;
     drawPreview();
   });
+  $("btnModeCrop").onclick = () => setEditMode("crop");
+  $("btnModeAnn").onclick = () => setEditMode("annotate");
+  $("btnAnnSelect").onclick = () => setAnnTool("select");
+  $("btnAnnArrow").onclick = () => setAnnTool("arrow");
+  $("btnAnnDash").onclick = () => setAnnTool("dash");
+  $("btnAnnCurve").onclick = () => setAnnTool("curve");
+  $("btnAnnCircle").onclick = () => setAnnTool("circle");
+  $("btnDelShape").onclick = () => deleteSelectedShape();
+  $("annSize").addEventListener("input", () => {
+    $("annSizeLabel").textContent = $("annSize").value;
+    const sh = selectedShape();
+    if (sh) { sh.size = annSizeVal(); draw(); }
+  });
+  $("annColor").addEventListener("change", () => {
+    const sh = selectedShape();
+    if (sh) { sh.color = annColorVal(); draw(); }
+  });
+  syncAnnUI();
 
   window.addEventListener("keydown", (ev) => {
     if (ev.key === " " && ev.target === document.body || ev.key === " " && ev.target.tagName !== "INPUT") {
@@ -1436,7 +1920,25 @@
     }
     if (ev.key === "ArrowRight") { ev.preventDefault(); selectPhoto(current + 1); }
     if (ev.key === "ArrowLeft") { ev.preventDefault(); selectPhoto(current - 1); }
+    if (ev.key === "Delete" || ev.key === "Backspace") {
+      if (selectedShape() && ev.target.tagName !== "INPUT") {
+        ev.preventDefault();
+        deleteSelectedShape();
+        return;
+      }
+    }
     if (ev.key === "Escape") {
+      if (selectedShapeId) {
+        ev.preventDefault();
+        selectedShapeId = null;
+        syncAnnUI();
+        draw();
+        return;
+      }
+      if (editMode === "annotate") {
+        ev.preventDefault();
+        return;
+      }
       if (lockOn() && bitmap) placeDefaultFrame();
       else {
         crop = null;
