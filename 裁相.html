@@ -247,10 +247,12 @@
   <div class="app" id="app">
     <header>
       <div class="logo">裁相</div>
-      <span class="ver" id="appVersion" title="版本 1.2.0">版本 1.2.0</span>
+      <span class="ver" id="appVersion" title="版本 1.2.1">版本 1.2.1</span>
       <button type="button" id="btnOpen">開啟相片</button>
       <button type="button" id="btnFolder">開啟資料夾</button>
       <button type="button" id="btnClearCrop">重設裁剪框</button>
+      <button type="button" id="btnUndo" disabled title="Ctrl+Z">上一步</button>
+      <button type="button" id="btnRedo" disabled title="Ctrl+Y 或 Ctrl+Shift+Z">重做</button>
       <div class="spacer"></div>
       <div class="out-dir" id="outDirLabel">尚未揀輸出資料夾</div>
       <button type="button" id="btnPickOut" hidden>揀輸出資料夾</button>
@@ -393,7 +395,7 @@
           檔名會係原本檔名加 <code>_crop</code>，例如 IMG_1234_crop.jpg。<br />
           預設用同原圖一樣嘅長寬比例，輸出亦可放大回原圖像素大細，避免裁完每張型狀同大細唔同。<br />
           大量處理：用 Chrome 或 Edge 先揀輸出資料夾，然後逐張調框按 Enter 直接儲存，唔使一張張下載。
-          標註圖形會印喺裁好嘅相片上，日期時間最後先印。
+          標註圖形會印喺裁好嘅相片上，日期時間最後先印。可用「上一步」（Ctrl+Z）還原標註或裁剪框改動。
         </div>
       </aside>
     </div>
@@ -405,6 +407,8 @@
         · <kbd>Enter</kbd> 儲存並下一張
         · <kbd>Esc</kbd> 取消選取／重設裁剪框
         · <kbd>Delete</kbd> 刪除圖形
+        · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 上一步
+        · <kbd>Ctrl</kbd>+<kbd>Y</kbd> 重做
       </div>
     </footer>
   </div>
@@ -427,6 +431,8 @@
   let annTool = "select"; // "select" | "arrow" | "dash" | "curve" | "circle"
   let selectedShapeId = null;
   let shapeSeq = 1;
+  let pendingUndo = null;
+  const UNDO_LIMIT = 50;
 
   const $ = (id) => document.getElementById(id);
   const view = $("view");
@@ -735,12 +741,14 @@
 
   function placeDefaultFrame() {
     if (!bitmap) return;
-    crop = defaultFrame();
-    if (currentPhoto()) currentPhoto().crop = { ...crop };
-    syncFrameSlider();
-    updateOutSizeHint();
-    draw();
-    renderThumbs();
+    withUndo(() => {
+      crop = defaultFrame();
+      if (currentPhoto()) currentPhoto().crop = { ...crop };
+      syncFrameSlider();
+      updateOutSizeHint();
+      draw();
+      renderThumbs();
+    });
   }
 
   function syncFrameSlider() {
@@ -752,6 +760,8 @@
 
   function applyFrameSize(pct, center) {
     if (!bitmap) return;
+    const already = !!pendingUndo;
+    if (!already) beginUndo();
     const p = pct / 100;
     const w = bitmap.width * p, h = bitmap.height * p;
     let cx, cy;
@@ -766,20 +776,23 @@
     if (currentPhoto()) currentPhoto().crop = { ...crop };
     updateOutSizeHint();
     draw();
+    if (!already) commitUndo();
   }
 
   function refitCurrentToRatio() {
     if (!bitmap) return;
     if (!crop) { placeDefaultFrame(); return; }
-    const cx = crop.x + crop.w / 2, cy = crop.y + crop.h / 2;
-    const pct = Math.min(crop.w / bitmap.width, crop.h / bitmap.height, 1);
-    const w = bitmap.width * Math.max(pct, 0.3);
-    const h = bitmap.height * Math.max(pct, 0.3);
-    crop = clampRatioRect(cx - w / 2, cy - h / 2, w, h);
-    if (currentPhoto()) currentPhoto().crop = { ...crop };
-    syncFrameSlider();
-    updateOutSizeHint();
-    draw();
+    withUndo(() => {
+      const cx = crop.x + crop.w / 2, cy = crop.y + crop.h / 2;
+      const pct = Math.min(crop.w / bitmap.width, crop.h / bitmap.height, 1);
+      const w = bitmap.width * Math.max(pct, 0.3);
+      const h = bitmap.height * Math.max(pct, 0.3);
+      crop = clampRatioRect(cx - w / 2, cy - h / 2, w, h);
+      if (currentPhoto()) currentPhoto().crop = { ...crop };
+      syncFrameSlider();
+      updateOutSizeHint();
+      draw();
+    });
   }
 
   function outputDims(bmp, c) {
@@ -881,6 +894,97 @@
     }[hit] || "crosshair";
   }
 
+
+
+  // ---- 上一步／重做（每張相各自一組紀錄）----
+  function ensureHistory(p) {
+    p = p || currentPhoto();
+    if (!p) return null;
+    if (!Array.isArray(p.undoStack)) p.undoStack = [];
+    if (!Array.isArray(p.redoStack)) p.redoStack = [];
+    return p;
+  }
+  function snapshotState(p) {
+    p = p || currentPhoto();
+    if (!p) return null;
+    const c = (p === currentPhoto()) ? crop : p.crop;
+    const shapes = (p === currentPhoto()) ? (p.shapes || []) : (p.shapes || []);
+    return {
+      crop: c ? { x: c.x, y: c.y, w: c.w, h: c.h } : null,
+      shapes: JSON.parse(JSON.stringify(shapes || [])),
+      selectedShapeId: (p === currentPhoto()) ? selectedShapeId : null,
+    };
+  }
+  function sameHistoryState(a, b) {
+    if (!a || !b) return false;
+    return JSON.stringify({ crop: a.crop, shapes: a.shapes }) === JSON.stringify({ crop: b.crop, shapes: b.shapes });
+  }
+  function beginUndo() {
+    if (pendingUndo) return;
+    pendingUndo = snapshotState();
+  }
+  function commitUndo() {
+    if (!pendingUndo) return;
+    const p = ensureHistory();
+    if (p && !sameHistoryState(pendingUndo, snapshotState(p))) {
+      p.undoStack.push(pendingUndo);
+      if (p.undoStack.length > UNDO_LIMIT) p.undoStack.shift();
+      p.redoStack = [];
+    }
+    pendingUndo = null;
+    syncUndoUI();
+  }
+  function withUndo(fn) {
+    const had = !!pendingUndo;
+    if (!had) beginUndo();
+    fn();
+    if (!had) commitUndo();
+  }
+  function applySnapshot(snap) {
+    const p = currentPhoto();
+    if (!p || !snap) return;
+    p.shapes = JSON.parse(JSON.stringify(snap.shapes || []));
+    const c = snap.crop ? { x: snap.crop.x, y: snap.crop.y, w: snap.crop.w, h: snap.crop.h } : null;
+    p.crop = c;
+    crop = c ? { ...c } : null;
+    selectedShapeId = (snap.selectedShapeId && p.shapes.some((s) => s.id === snap.selectedShapeId))
+      ? snap.selectedShapeId : null;
+    syncFrameSlider();
+    updateOutSizeHint();
+    syncAnnUI();
+    syncUndoUI();
+    draw();
+    renderThumbs();
+  }
+  function canUndo() {
+    const p = currentPhoto();
+    return !!(p && p.undoStack && p.undoStack.length);
+  }
+  function canRedo() {
+    const p = currentPhoto();
+    return !!(p && p.redoStack && p.redoStack.length);
+  }
+  function syncUndoUI() {
+    const u = $("btnUndo"), r = $("btnRedo");
+    if (u) u.disabled = !canUndo();
+    if (r) r.disabled = !canRedo();
+  }
+  function undo() {
+    if (drag) return;
+    pendingUndo = null;
+    const p = ensureHistory();
+    if (!p || !p.undoStack.length) return;
+    p.redoStack.push(snapshotState(p));
+    applySnapshot(p.undoStack.pop());
+  }
+  function redo() {
+    if (drag) return;
+    pendingUndo = null;
+    const p = ensureHistory();
+    if (!p || !p.redoStack.length) return;
+    p.undoStack.push(snapshotState(p));
+    applySnapshot(p.redoStack.pop());
+  }
 
   // ---- 標註圖形 ----
   function annColorVal() { return $("annColor").value || "#e53935"; }
@@ -1059,12 +1163,14 @@
   function deleteSelectedShape() {
     const sh = selectedShape();
     if (!sh) return;
-    const list = currentShapes();
-    const i = list.indexOf(sh);
-    if (i >= 0) list.splice(i, 1);
-    selectedShapeId = null;
-    syncAnnUI();
-    draw();
+    withUndo(() => {
+      const list = currentShapes();
+      const i = list.indexOf(sh);
+      if (i >= 0) list.splice(i, 1);
+      selectedShapeId = null;
+      syncAnnUI();
+      draw();
+    });
   }
   function viewXf() {
     return {
@@ -1332,6 +1438,8 @@
         orientation: meta.orientation || 1,
         crop: null,
         shapes: [],
+        undoStack: [],
+        redoStack: [],
         stampOverride: null,
         exported: false,
         thumbUrl: "",
@@ -1353,6 +1461,8 @@
     if (index < 0 || index >= photos.length) return;
     const prev = currentPhoto();
     if (prev) prev.crop = crop ? { ...crop } : null;
+    commitUndo();
+    pendingUndo = null;
     current = index;
     dateDirty = false;
     const p = photos[current];
@@ -1382,6 +1492,7 @@
     syncFrameSlider();
     updateOutSizeHint();
     syncAnnUI();
+    syncUndoUI();
     fitView();
     draw();
     renderThumbs();
@@ -1405,6 +1516,7 @@
     if (editMode === "annotate") {
       const hh = hitAnnHandle(px, py);
       if (hh) {
+        beginUndo();
         selectedShapeId = hh.shape.id;
         drag = { type: "ann-handle", handle: hh.handle, id: hh.shape.id };
         syncAnnUI();
@@ -1413,6 +1525,7 @@
       }
       const hitSh = hitShapeAt(px, py);
       if (hitSh) {
+        beginUndo();
         selectedShapeId = hitSh.id;
         drag = { type: "ann-move", id: hitSh.id, startX: ix, startY: iy, snapshot: cloneShape(hitSh) };
         syncAnnUI();
@@ -1420,6 +1533,7 @@
         return;
       }
       if (annTool && annTool !== "select") {
+        beginUndo();
         const sh = newShape(annTool, ix, iy);
         currentShapes().push(sh);
         selectedShapeId = sh.id;
@@ -1435,10 +1549,13 @@
     }
     const hit = hitHandle(px, py);
     if (hit && hit !== "body") {
+      beginUndo();
       drag = { type: "resize", handle: hit, start: { ...crop }, ix, iy };
     } else if (hit === "body") {
+      beginUndo();
       drag = { type: "move", start: { ...crop }, ix, iy };
     } else {
+      beginUndo();
       drag = { type: "new", ix, iy };
       crop = { x: ix, y: iy, w: 8, h: 8 };
     }
@@ -1531,12 +1648,14 @@
         selectedShapeId = null;
       }
       drag = null;
+      commitUndo();
       syncAnnUI();
       draw();
       return;
     }
     drag = null;
     if (currentPhoto()) currentPhoto().crop = crop ? { ...crop } : null;
+    commitUndo();
     syncFrameSlider();
     updateOutSizeHint();
     draw();
@@ -1800,11 +1919,13 @@
       placeDefaultFrame();
       setStatus("已重設為原圖比例框");
     } else {
-      crop = null;
-      if (currentPhoto()) currentPhoto().crop = null;
-      updateOutSizeHint();
-      draw();
-      renderThumbs();
+      withUndo(() => {
+        crop = null;
+        if (currentPhoto()) currentPhoto().crop = null;
+        updateOutSizeHint();
+        draw();
+        renderThumbs();
+      });
     }
   };
   $("btnPlaceFrame").onclick = () => placeDefaultFrame();
@@ -1846,10 +1967,12 @@
     updateOutSizeHint();
     drawPreview();
   });
+  $("frameSize").addEventListener("pointerdown", () => { if (lockOn() && bitmap) beginUndo(); });
   $("frameSize").addEventListener("input", () => {
     $("frameSizeLabel").textContent = $("frameSize").value + "%";
     if (lockOn()) applyFrameSize(framePct(), true);
   });
+  $("frameSize").addEventListener("change", () => commitUndo());
   $("btnExport").onclick = () => exportCurrent(true).catch((err) => {
     if (!err || err.name !== "AbortError") setStatus("儲存失敗：" + (err && err.message ? err.message : err));
   });
@@ -1898,16 +2021,25 @@
   $("btnAnnCurve").onclick = () => setAnnTool("curve");
   $("btnAnnCircle").onclick = () => setAnnTool("circle");
   $("btnDelShape").onclick = () => deleteSelectedShape();
+  $("annSize").addEventListener("pointerdown", () => { if (selectedShape()) beginUndo(); });
   $("annSize").addEventListener("input", () => {
     $("annSizeLabel").textContent = $("annSize").value;
     const sh = selectedShape();
-    if (sh) { sh.size = annSizeVal(); draw(); }
+    if (sh) {
+      if (!pendingUndo) beginUndo();
+      sh.size = annSizeVal();
+      draw();
+    }
   });
+  $("annSize").addEventListener("change", () => commitUndo());
   $("annColor").addEventListener("change", () => {
     const sh = selectedShape();
-    if (sh) { sh.color = annColorVal(); draw(); }
+    if (sh) withUndo(() => { sh.color = annColorVal(); draw(); });
   });
+  $("btnUndo").onclick = () => undo();
+  $("btnRedo").onclick = () => redo();
   syncAnnUI();
+  syncUndoUI();
 
   window.addEventListener("keydown", (ev) => {
     if (ev.key === " " && ev.target === document.body || ev.key === " " && ev.target.tagName !== "INPUT") {
@@ -1916,6 +2048,17 @@
     }
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") {
       if (ev.key === "Enter") ev.target.blur();
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
+      ev.preventDefault();
+      if (ev.shiftKey) redo();
+      else undo();
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "y") {
+      ev.preventDefault();
+      redo();
       return;
     }
     if (ev.key === "ArrowRight") { ev.preventDefault(); selectPhoto(current + 1); }
@@ -1941,10 +2084,12 @@
       }
       if (lockOn() && bitmap) placeDefaultFrame();
       else {
-        crop = null;
-        if (currentPhoto()) currentPhoto().crop = null;
-        updateOutSizeHint();
-        draw(); renderThumbs();
+        withUndo(() => {
+          crop = null;
+          if (currentPhoto()) currentPhoto().crop = null;
+          updateOutSizeHint();
+          draw(); renderThumbs();
+        });
       }
     }
     if (ev.key === "Enter") { ev.preventDefault(); exportCurrent(true); }
