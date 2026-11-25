@@ -193,6 +193,22 @@
     .row:last-child { margin-bottom: 0; }
     .row label { width: 64px; flex: none; color: var(--muted); font-size: 12px; }
     .row input, .row select { flex: 1; min-width: 0; }
+    .row button.compact {
+      flex: none;
+      padding: 5px 8px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .date-notice {
+      color: #ffd080;
+      font-size: 12px;
+      line-height: 1.55;
+      margin: 0 0 8px;
+      padding: 6px 8px;
+      background: #3a2a12;
+      border: 1px solid #7a5a20;
+      border-radius: 6px;
+    }
     .help { color: var(--muted); font-size: 12px; line-height: 1.55; }
     footer {
       display: flex;
@@ -247,7 +263,7 @@
   <div class="app" id="app">
     <header>
       <div class="logo">裁相</div>
-      <span class="ver" id="appVersion" title="版本 1.2.1">版本 1.2.1</span>
+      <span class="ver" id="appVersion" title="版本 1.2.2">版本 1.2.2</span>
       <button type="button" id="btnOpen">開啟相片</button>
       <button type="button" id="btnFolder">開啟資料夾</button>
       <button type="button" id="btnClearCrop">重設裁剪框</button>
@@ -346,10 +362,16 @@
             <label>來源</label>
             <span id="dateSource" class="help">未選相</span>
           </div>
+          <div class="date-notice" id="dateNotice" hidden>呢張相沒有拍攝日期（EXIF），可以喺下面「印字」欄人手輸入。</div>
           <div class="row">
             <label>印字</label>
             <input type="text" id="dateText" placeholder="19 08 2026 11:31" spellcheck="false" />
           </div>
+          <div class="row">
+            <label></label>
+            <button type="button" id="btnUseExif" class="compact" disabled title="用回呢張相嘅拍攝時間">用回 EXIF</button>
+          </div>
+          <div class="help">每張相預設用自己嘅拍攝日期。你喺呢張手改嘅印字會留住，轉走再轉返嚟都唔會被 EXIF 蓋掉，亦唔會改到其他已有拍攝日期嘅相。撳「用回 EXIF」或清空輸入欄，就用回呢張嘅拍攝時間。</div>
           <div class="row">
             <label>格式</label>
             <select id="dateFormat">
@@ -563,6 +585,7 @@
     const head = file.slice(0, 128 * 1024);
     const buf = await head.arrayBuffer();
     const exif = readJpegExif(buf);
+    exif.hasShotDate = !!exif.date;
     if (!exif.date) {
       exif.date = file.lastModified ? new Date(file.lastModified) : null;
       exif.source = exif.date ? "檔案修改時間（無 EXIF）" : "沒有日期";
@@ -648,8 +671,53 @@
 
   function stampTextFor(photo) {
     if (!photo) return "";
+    if (photo.dateHandEdited && photo.stampOverride != null) return photo.stampOverride;
     if (photo.stampOverride != null) return photo.stampOverride;
     return formatDate(photo.date, style.format);
+  }
+
+  function usingCustomStamp(photo) {
+    if (!photo) return false;
+    return (photo.dateHandEdited && photo.stampOverride != null) || photo.stampOverride != null;
+  }
+
+  function hasShotDate(photo) {
+    return !!(photo && photo.hasShotDate);
+  }
+
+  function syncDateUI() {
+    const p = currentPhoto();
+    const btn = $("btnUseExif");
+    const notice = $("dateNotice");
+    if (!p) {
+      if (btn) btn.disabled = true;
+      if (notice) notice.hidden = true;
+      $("dateSource").textContent = "未選相";
+      return;
+    }
+    if (btn) btn.disabled = !usingCustomStamp(p);
+    if (notice) notice.hidden = hasShotDate(p);
+    if (usingCustomStamp(p)) {
+      $("dateSource").textContent = "人手輸入（呢張相會保留）";
+    } else {
+      $("dateSource").textContent = p.source || "—";
+    }
+  }
+
+  function revertToExif() {
+    const p = currentPhoto();
+    dateDirty = false;
+    if (p) {
+      p.stampOverride = null;
+      p.dateHandEdited = false;
+    }
+    $("dateText").value = stampTextFor(p);
+    syncDateUI();
+    drawPreview();
+    renderThumbs();
+    if (!p) return;
+    if (hasShotDate(p)) setStatus("已用回呢張相嘅拍攝時間");
+    else setStatus("已用回原本日期；呢張相沒有拍攝日期，可以人手輸入");
   }
 
   function fitView() {
@@ -1435,12 +1503,14 @@
         key, file, name: file.name,
         date: meta.date,
         source: meta.source,
+        hasShotDate: !!meta.hasShotDate,
         orientation: meta.orientation || 1,
         crop: null,
         shapes: [],
         undoStack: [],
         redoStack: [],
         stampOverride: null,
+        dateHandEdited: false,
         exported: false,
         thumbUrl: "",
       });
@@ -1468,8 +1538,12 @@
     const p = photos[current];
     crop = p.crop ? { ...p.crop } : null;
     $("dateText").value = stampTextFor(p);
-    $("dateSource").textContent = p.source || "—";
-    setStatus(`${p.name}  ·  ${p.source}${p.date ? "  " + formatDate(p.date, "YYYY-MM-DD HH:MM") : ""}`);
+    syncDateUI();
+    if (!hasShotDate(p) && !usingCustomStamp(p)) {
+      setStatus(`${p.name}  ·  呢張相沒有拍攝日期，可以喺右邊「印字」欄人手輸入`);
+    } else {
+      setStatus(`${p.name}  ·  ${p.source}${p.date ? "  " + formatDate(p.date, "YYYY-MM-DD HH:MM") : ""}`);
+    }
     renderThumbs();
     bitmap = await decodeUpright(p.file, p.orientation);
     p.width = bitmap.width;
@@ -1989,22 +2063,46 @@
     if (t) selectPhoto(Number(t.dataset.i));
   };
   $("dateText").addEventListener("input", () => {
-    dateDirty = true;
     const p = currentPhoto();
-    if (p) p.stampOverride = $("dateText").value;
-    drawPreview();
-  });
-  $("dateFormat").onchange = () => {
-    for (const p of photos) {
-      // 只刷新未人手改過嘅印字
-      if (p.stampOverride == null) {}
+    const text = $("dateText").value;
+    if (!text.trim()) {
+      dateDirty = false;
+      if (p) {
+        p.stampOverride = null;
+        p.dateHandEdited = false;
+      }
+      syncDateUI();
+      drawPreview();
+      renderThumbs();
+      return;
     }
+    dateDirty = true;
+    if (p) {
+      p.stampOverride = text;
+      p.dateHandEdited = true;
+    }
+    syncDateUI();
+    drawPreview();
+    renderThumbs();
+  });
+  $("dateText").addEventListener("blur", () => {
     const p = currentPhoto();
-    if (p && !dateDirty) {
+    if (p && !$("dateText").value.trim()) {
+      $("dateText").value = stampTextFor(p);
+      syncDateUI();
+    }
+  });
+  $("btnUseExif").onclick = () => revertToExif();
+  $("dateFormat").onchange = () => {
+    const p = currentPhoto();
+    // 手改過嘅印字唔好被格式蓋掉
+    if (p && !p.dateHandEdited) {
       p.stampOverride = null;
       $("dateText").value = stampTextFor(p);
     }
+    syncDateUI();
     drawPreview();
+    renderThumbs();
   };
   ["stampPos","stampColor","stampOn"].forEach((id) => {
     $(id).addEventListener("change", drawPreview);
