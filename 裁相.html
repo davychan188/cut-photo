@@ -263,7 +263,7 @@
   <div class="app" id="app">
     <header>
       <div class="logo">裁相</div>
-      <span class="ver" id="appVersion" title="版本 1.2.2">版本 1.2.2</span>
+      <span class="ver" id="appVersion" title="版本 1.2.3">版本 1.2.3</span>
       <button type="button" id="btnOpen">開啟相片</button>
       <button type="button" id="btnFolder">開啟資料夾</button>
       <button type="button" id="btnClearCrop">重設裁剪框</button>
@@ -369,9 +369,9 @@
           </div>
           <div class="row">
             <label></label>
-            <button type="button" id="btnUseExif" class="compact" disabled title="用回呢張相嘅拍攝時間">用回 EXIF</button>
+            <button type="button" id="btnUseExif" class="compact" disabled title="取消手改，用回各張自己嘅拍攝時間">用回 EXIF</button>
           </div>
-          <div class="help">每張相預設用自己嘅拍攝日期。你喺呢張手改嘅印字會留住，轉走再轉返嚟都唔會被 EXIF 蓋掉，亦唔會改到其他已有拍攝日期嘅相。撳「用回 EXIF」或清空輸入欄，就用回呢張嘅拍攝時間。</div>
+          <div class="help">每張相預設用自己嘅拍攝日期。一旦喺「印字」欄輸入日期時間，轉去其他相都會保留上一次輸入嘅時間，輸入欄同印字都唔會自動換回嗰張嘅 EXIF。撳「用回 EXIF」或清空輸入欄，就用回各張自己嘅拍攝時間，亦唔再套用舊嘅輸入。</div>
           <div class="row">
             <label>格式</label>
             <select id="dateFormat">
@@ -448,6 +448,7 @@
   let drag = null;
   let spaceDown = false;
   let dateDirty = false;
+  let lastEnteredDate = null; // 上一次喺印字欄輸入嘅時間，轉相會沿用
   let outputDir = null; // FileSystemDirectoryHandle
   let editMode = "crop"; // "crop" | "annotate"
   let annTool = "select"; // "select" | "arrow" | "dash" | "curve" | "circle"
@@ -671,6 +672,7 @@
 
   function stampTextFor(photo) {
     if (!photo) return "";
+    if (lastEnteredDate != null) return lastEnteredDate;
     if (photo.dateHandEdited && photo.stampOverride != null) return photo.stampOverride;
     if (photo.stampOverride != null) return photo.stampOverride;
     return formatDate(photo.date, style.format);
@@ -678,6 +680,7 @@
 
   function usingCustomStamp(photo) {
     if (!photo) return false;
+    if (lastEnteredDate != null) return true;
     return (photo.dateHandEdited && photo.stampOverride != null) || photo.stampOverride != null;
   }
 
@@ -697,8 +700,10 @@
     }
     if (btn) btn.disabled = !usingCustomStamp(p);
     if (notice) notice.hidden = hasShotDate(p);
-    if (usingCustomStamp(p)) {
-      $("dateSource").textContent = "人手輸入（呢張相會保留）";
+    if (lastEnteredDate != null) {
+      $("dateSource").textContent = "人手輸入（轉相會保留上一次輸入）";
+    } else if (usingCustomStamp(p)) {
+      $("dateSource").textContent = "人手輸入";
     } else {
       $("dateSource").textContent = p.source || "—";
     }
@@ -706,6 +711,7 @@
 
   function revertToExif() {
     const p = currentPhoto();
+    lastEnteredDate = null;
     dateDirty = false;
     if (p) {
       p.stampOverride = null;
@@ -716,8 +722,8 @@
     drawPreview();
     renderThumbs();
     if (!p) return;
-    if (hasShotDate(p)) setStatus("已用回呢張相嘅拍攝時間");
-    else setStatus("已用回原本日期；呢張相沒有拍攝日期，可以人手輸入");
+    if (hasShotDate(p)) setStatus("已用回各張自己嘅拍攝時間，唔再保留上一次輸入");
+    else setStatus("已停止保留上一次輸入；呢張相沒有拍攝日期，可以人手輸入");
   }
 
   function fitView() {
@@ -1539,7 +1545,7 @@
     crop = p.crop ? { ...p.crop } : null;
     $("dateText").value = stampTextFor(p);
     syncDateUI();
-    if (!hasShotDate(p) && !usingCustomStamp(p)) {
+    if (!hasShotDate(p)) {
       setStatus(`${p.name}  ·  呢張相沒有拍攝日期，可以喺右邊「印字」欄人手輸入`);
     } else {
       setStatus(`${p.name}  ·  ${p.source}${p.date ? "  " + formatDate(p.date, "YYYY-MM-DD HH:MM") : ""}`);
@@ -2066,6 +2072,7 @@
     const p = currentPhoto();
     const text = $("dateText").value;
     if (!text.trim()) {
+      lastEnteredDate = null;
       dateDirty = false;
       if (p) {
         p.stampOverride = null;
@@ -2077,6 +2084,7 @@
       return;
     }
     dateDirty = true;
+    lastEnteredDate = text;
     if (p) {
       p.stampOverride = text;
       p.dateHandEdited = true;
@@ -2095,8 +2103,8 @@
   $("btnUseExif").onclick = () => revertToExif();
   $("dateFormat").onchange = () => {
     const p = currentPhoto();
-    // 手改過嘅印字唔好被格式蓋掉
-    if (p && !p.dateHandEdited) {
+    // 保留中或手改過嘅印字唔好被格式蓋掉
+    if (p && lastEnteredDate == null && !p.dateHandEdited) {
       p.stampOverride = null;
       $("dateText").value = stampTextFor(p);
     }
